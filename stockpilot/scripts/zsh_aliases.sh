@@ -36,6 +36,9 @@ alias aip="bash $STOCKPILOT_ROOT/scripts/ai_step.sh"
 # Git 체크포인트
 alias aigit="bash $STOCKPILOT_ROOT/scripts/git_checkpoint.sh"
 
+# GitHub 안전 업로드 (보안검사 + 승인 후 push)
+alias aigit_upload="bash $STOCKPILOT_ROOT/scripts/git_upload.sh"
+
 # 수동 기록
 alias aihist="bash $STOCKPILOT_ROOT/scripts/append_history.sh"
 
