@@ -1,15 +1,16 @@
 # stockpilot — Claude 운영 지침
 
 > 이 파일은 Claude가 새 세션을 시작할 때 가장 먼저 읽는 핵심 지침이다.
-> 상세한 API/분석/리포트 작업 방법은 `.skills/*/SKILL.md` 를 참고한다.
+> 현재 상태 및 다음 작업은 `HANDOFF.md` 참고.
 
 ---
 
 ## 1. 프로젝트 한 줄 요약
 
-KIS Open API 기반 주식 자동화 시스템. 평일 4회 브리핑을 카카오톡으로 전송한다.
+KIS Open API 기반 주식 자동화 시스템. 평일 자동 브리핑 + 텔레그램 양방향 명령 지원.
 
 - **Python 환경:** `venv/bin/python3` (Python 3.14)
+- **프로젝트 경로:** `/Users/geenya/projects/AI_Projects/stockpilot`
 - **메인 스크립트:** `morning_report/` 폴더
 
 ---
@@ -37,16 +38,25 @@ inject_to_env()   # 반드시 첫 줄에 호출
 ```bash
 cd /Users/geenya/projects/AI_Projects/stockpilot
 
-# 테스트 (카카오 전송 없이)
+# 테스트 (전송 없이)
 venv/bin/python3 morning_report/morning_report.py --dry-run
 venv/bin/python3 morning_report/closing_report.py --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
 
 # Keychain 상태 확인 / 재설정
 venv/bin/python3 morning_report/keychain_manager.py
 venv/bin/python3 morning_report/keychain_manager.py --reset
 
+# 전체 launchd 등록 상태 확인
+launchctl list | grep aigeenya
+
 # 로그 확인
-tail -50 logs/closing_report.log
+tail -50 logs/intraday_discovery.log
+tail -50 logs/stockbot_error.log
+
+# GitHub 안전 업로드
+aigit_upload
 ```
 
 ---
@@ -56,10 +66,13 @@ tail -50 logs/closing_report.log
 | 파일 | 역할 |
 |------|------|
 | `morning_report/keychain_manager.py` | Keychain 관리, `inject_to_env()` 제공 |
-| `morning_report/kakao_sender.py` | 카카오톡 전송 (Keychain 기반) |
+| `morning_report/telegram_bot.py` | 텔레그램 봇 데몬 (부팅 시 자동 시작) |
+| `morning_report/orchestrator.py` | 텔레그램 명령 라우팅 |
+| `morning_report/state_manager.py` | 에이전트 간 공유 상태 |
+| `morning_report/intraday_discovery.py` | 장초기 실시간 종목 발굴 |
 | `.skills/kis-api/scripts/kis_client.py` | KIS API 클라이언트 |
 | `data/watchlist.json` | 관심종목 목록 |
-| `data/cache/` | KIS 토큰 캐시 |
+| `data/daily_state.json` | 에이전트 간 공유 상태 (런타임) |
 
 ---
 
@@ -69,9 +82,12 @@ tail -50 logs/closing_report.log
 |------|----------|
 | 08:20 | `watchlist_sync.py` |
 | 08:30 | `morning_report.py` |
+| 09:03 | `intraday_discovery.py --round 1` |
+| 09:05 | `intraday_discovery.py --round 2` |
 | 09:10 | `intraday_report.py` |
 | 20:30 | `closing_report.py` |
 | 23:30 | `stock_discovery.py` (월~토) |
+| 상시  | `telegram_bot.py` (봇 데몬) |
 
 ---
 
@@ -92,7 +108,3 @@ tail -50 logs/closing_report.log
 - 문법 검사: `venv/bin/python3 -m py_compile morning_report/<파일>.py`
 - 복잡한 로직 변경 시: Opus 서브에이전트(high effort)로 검증
 - KIS API 궁금한 점: `docs/api/` 폴더의 xlsx 파일 참고
-
----
-
-*현재 상태 및 다음 작업은 `HANDOFF.md` 참고*
