@@ -31,7 +31,7 @@ chmod +x "$STOCKPILOT_ROOT/scripts"/*.sh 2>/dev/null || true
 alias aiinit="bash $STOCKPILOT_ROOT/scripts/init_project.sh"
 
 # 단계 실행 (대화형 또는 지정)
-alias aip="bash $STOCKPILOT_ROOT/scripts/ai_step.sh"
+alias aip="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh"
 
 # Git 체크포인트
 alias aigit="bash $STOCKPILOT_ROOT/scripts/git_checkpoint.sh"
@@ -47,44 +47,44 @@ alias aihist="bash $STOCKPILOT_ROOT/scripts/append_history.sh"
 # ============================================================
 
 # Stage 1: 아이디어 구상
-alias aib="bash $STOCKPILOT_ROOT/scripts/ai_step.sh brainstorm"
+alias aib="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh brainstorm"
 
 # Stage 2: 계획 초안
-alias aipd="bash $STOCKPILOT_ROOT/scripts/ai_step.sh planning_draft"
+alias aipd="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh planning_draft"
 
 # Stage 3: 계획 검토
-alias aipr="bash $STOCKPILOT_ROOT/scripts/ai_step.sh planning_review"
+alias aipr="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh planning_review"
 
 # Stage 4: 계획 통합
-alias aipf="bash $STOCKPILOT_ROOT/scripts/ai_step.sh planning_final"
+alias aipf="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh planning_final"
 
 # Stage 5: 기술 설계
-alias aitd="bash $STOCKPILOT_ROOT/scripts/ai_step.sh technical_design"
+alias aitd="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh technical_design"
 
 # Stage 6: UI 요구사항 (선택)
-alias aiui="bash $STOCKPILOT_ROOT/scripts/ai_step.sh ui_requirements"
+alias aiui="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh ui_requirements"
 
 # Stage 7: UI 플로우 (선택)
-alias aiflow="bash $STOCKPILOT_ROOT/scripts/ai_step.sh ui_flow"
+alias aiflow="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh ui_flow"
 
 # Stage 9: 코드 리뷰
-alias aireview="bash $STOCKPILOT_ROOT/scripts/ai_step.sh code_review"
+alias aireview="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh code_review"
 
 # Stage 11: 최종 검증
-alias aifinal="bash $STOCKPILOT_ROOT/scripts/ai_step.sh final_review"
+alias aifinal="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh final_review"
 
 # Stage 12: QA & 릴리스
-alias aiqa="bash $STOCKPILOT_ROOT/scripts/ai_step.sh qa"
+alias aiqa="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh qa"
 
 # ============================================================
 # Stage별 Alias - Codex 단계
 # ============================================================
 
 # Stage 8: 구현
-alias aiimpl="bash $STOCKPILOT_ROOT/scripts/ai_step.sh implementation"
+alias aiimpl="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh implementation"
 
 # Stage 10: 수정
-alias airevise="bash $STOCKPILOT_ROOT/scripts/ai_step.sh revise"
+alias airevise="zsh $STOCKPILOT_ROOT/scripts/ai_step.sh revise"
 
 # ============================================================
 # 편의 함수
@@ -126,7 +126,7 @@ ai_cd() {
 }
 
 # 대시보드
-alias aidash="bash $STOCKPILOT_ROOT/scripts/ai_dashboard.sh"
+alias aidash="zsh $STOCKPILOT_ROOT/scripts/ai_dashboard.sh"
 
 # ============================================================
 # 사용 안내

@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
 # ai_dashboard.sh — AI 프로젝트 워크플로우 대시보드 (박스형 TUI)
-# 사용법: bash scripts/ai_dashboard.sh
+# 사용법: zsh scripts/ai_dashboard.sh  또는  aidash
 # alias:  aidash
 
 set -e
@@ -35,15 +35,13 @@ draw_bottom() {
   printf "└──────────────────────────────────────────┘\n"
 }
 
-# 텍스트 포함 행 (ANSI 코드 포함 시 길이 보정)
+# 텍스트 포함 행 — visible 인자(plain text)로 길이 계산
 draw_text() {
-  local raw="$1"       # 출력할 원본 문자열 (ANSI 포함 가능)
-  local visible="$2"   # 실제 보이는 문자열 (길이 계산용)
+  local raw="$1"      # ANSI 포함 출력용
+  local visible="$2"  # 순수 텍스트(길이 계산용), 없으면 raw 그대로
   visible="${visible:-$raw}"
-  # ANSI escape 제거 후 가시 길이 계산
-  local clean
-  clean="$(printf '%s' "$visible" | sed 's/\x1b\[[0-9;]*m//g')"
-  local pad=$(( 40 - ${#clean} ))
+  local pad=$(( 40 - ${#visible} ))
+  (( pad < 0 )) && pad=0
   printf "│ %b%*s │\n" "$raw" "$pad" ""
 }
 
@@ -73,7 +71,12 @@ if [ ! -f "$WORKFLOW_FILE" ]; then
   exit 1
 fi
 
-mapfile -t STEPS < "$WORKFLOW_FILE"
+# zsh 호환 파일 읽기 (mapfile 대신)
+STEPS=()
+while IFS= read -r line || [ -n "$line" ]; do
+  [[ -z "$line" ]] && continue
+  STEPS+=("$line")
+done < "$WORKFLOW_FILE"
 
 # ---------- 현재 단계 로드 ----------
 CURRENT_STEP=""
@@ -91,44 +94,60 @@ if [ -z "$CURRENT_STEP" ]; then
   done
 fi
 
-# ---------- 다음 단계 추론 ----------
+# ---------- 현재/다음 단계 인덱스 계산 (zsh 1-based) ----------
+CURRENT_IDX=0
 NEXT_STEP=""
-FOUND=0
-if [ -n "$CURRENT_STEP" ]; then
-  for step in "${STEPS[@]}"; do
-    if [ "$FOUND" -eq 1 ]; then
-      NEXT_STEP="$step"
-      break
+for (( i=1; i<=${#STEPS[@]}; i++ )); do
+  if [ "${STEPS[$i]}" = "$CURRENT_STEP" ]; then
+    CURRENT_IDX=$i
+    if (( i < ${#STEPS[@]} )); then
+      NEXT_STEP="${STEPS[$((i+1))]}"
     fi
-    [ "$step" = "$CURRENT_STEP" ] && FOUND=1
-  done
-else
-  NEXT_STEP="${STEPS[0]}"
+    break
+  fi
+done
+# current_step.txt 없으면 첫 단계가 NEXT
+if [ -z "$CURRENT_STEP" ]; then
+  NEXT_STEP="${STEPS[1]}"
 fi
 
-# ---------- 렌더링 ----------
+# ---------- 헤더 (한글 없이 ASCII로 고정폭 유지) ----------
 clear 2>/dev/null || true
 
 draw_top
 draw_text "$(printf "${BOLD}${CYAN}  AI PROJECT DASHBOARD${RESET}")" "  AI PROJECT DASHBOARD"
 draw_line
-draw_text "$(printf "Current Step : ${BLUE}${BOLD}${CURRENT_STEP:-없음}${RESET}")" "Current Step : ${CURRENT_STEP:-없음}"
-draw_text "$(printf "Next Step    : ${YELLOW}${NEXT_STEP:-없음}${RESET}")" "Next Step    : ${NEXT_STEP:-없음}"
+
+# Current / Next — ASCII로만 구성해 폭 계산 안정화
+cur_val="${CURRENT_STEP:-none}"
+nxt_val="${NEXT_STEP:-none}"
+draw_text "$(printf "Current : ${BLUE}${BOLD}%-20s${RESET}" "$cur_val")" "$(printf "Current : %-20s" "$cur_val")"
+draw_text "$(printf "Next    : ${YELLOW}%-20s${RESET}"     "$nxt_val")" "$(printf "Next    : %-20s"     "$nxt_val")"
 draw_line
 
-for step in "${STEPS[@]}"; do
+# ---------- 단계 목록 ----------
+for (( i=1; i<=${#STEPS[@]}; i++ )); do
+  step="${STEPS[$i]}"
   path="$(get_output_path "$step")"
 
   if [ "$step" = "$CURRENT_STEP" ]; then
-    draw_text "$(printf "${BLUE}${BOLD}[→] %-24s (CURRENT)${RESET}" "$step")" "[→] $step (CURRENT)"
+    # 현재 단계
+    draw_text "$(printf "${BLUE}${BOLD}[>] %-22s NOW${RESET}" "$step")" "$(printf "[>] %-22s NOW" "$step")"
 
   elif [ "$step" = "$NEXT_STEP" ]; then
-    draw_text "$(printf "${YELLOW}[*] %-24s (NEXT)${RESET}" "$step")" "[*] $step (NEXT)"
+    # 다음 단계
+    draw_text "$(printf "${YELLOW}[*] %-22s ---${RESET}" "$step")" "$(printf "[*] %-22s ---" "$step")"
+
+  elif [ "$CURRENT_IDX" -gt 0 ] && [ "$i" -lt "$CURRENT_IDX" ]; then
+    # 현재보다 앞 → 완료
+    draw_text "$(printf "${GREEN}[v] ${step}${RESET}")" "[v] $step"
 
   elif [ -n "$path" ] && [ -f "$path" ] && [ -s "$path" ]; then
-    draw_text "$(printf "${GREEN}[✓] ${step}${RESET}")" "[✓] $step"
+    # 산출물 파일 있으면 완료
+    draw_text "$(printf "${GREEN}[v] ${step}${RESET}")" "[v] $step"
 
   else
+    # 미완료
     draw_text "$(printf "${GRAY}[ ] ${step}${RESET}")" "[ ] $step"
   fi
 

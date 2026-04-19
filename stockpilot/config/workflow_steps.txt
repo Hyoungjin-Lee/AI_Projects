@@ -1,0 +1,11 @@
+brainstorm
+planning_draft
+planning_review
+planning_final
+technical_design
+implementation
+code_review
+revise
+final_review
+qa
+deploy
