@@ -45,7 +45,7 @@ _MAX_PER_SECTOR  = 2      # 섹터당 최대 추천 종목 수
 _WEEKDAYS = {0, 1, 2, 3, 4}
 
 
-def run(dry_run: bool = False):
+def run(dry_run: bool = False, force: bool = False):
     now_str = datetime.now().strftime("%H:%M")
     weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][datetime.now().weekday()]
     today_str  = datetime.now().strftime(f"%Y년 %m월 %d일 ({weekday_kr})")
@@ -53,8 +53,9 @@ def run(dry_run: bool = False):
     print(f"[{now_str}] 종목 발굴 시작...", file=sys.stderr)
 
     # 주말에는 실행하지 않음 (금요일 밤은 토요일이지만 허용)
+    # force=True 시 요일 체크 건너뜀 (텔레그램 /발굴 명령 등)
     today_weekday = date.today().weekday()
-    if today_weekday == 6:  # 일요일만 건너뜀
+    if today_weekday == 6 and not force:  # 일요일만 건너뜀
         print("[발굴] 일요일입니다. 종료.", file=sys.stderr)
         return
 
@@ -464,5 +465,6 @@ def _save_report_fallback(report: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="야간 종목 발굴 브리핑")
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 전송 없이 출력만")
+    parser.add_argument("--force", action="store_true", help="요일 체크 건너뜀 (주말에도 강제 실행)")
     args = parser.parse_args()
-    run(dry_run=args.dry_run)
+    run(dry_run=args.dry_run, force=args.force)

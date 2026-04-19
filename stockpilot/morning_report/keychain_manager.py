@@ -2,10 +2,12 @@
 keychain_manager.py — macOS Keychain 기반 민감정보 관리
 
 저장 항목:
-  KIS_APP_KEY      KIS API 앱키
-  KIS_APP_SECRET   KIS API 앱시크릿
-  KIS_ACCOUNT_NO   계좌번호 (12345678-01 형식)
-  KIS_HTS_ID       MTS/홈페이지 로그인 ID
+  KIS_APP_KEY          KIS API 앱키
+  KIS_APP_SECRET       KIS API 앱시크릿
+  KIS_ACCOUNT_NO       계좌번호 (12345678-01 형식)
+  KIS_HTS_ID           MTS/홈페이지 로그인 ID
+  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰
+  TELEGRAM_CHAT_ID     텔레그램 chat_id
 
 사용법:
   from keychain_manager import inject_to_env
@@ -39,13 +41,16 @@ except ImportError:
 # Keychain 서비스명 (macOS 키체인 앱에서 이 이름으로 검색 가능)
 _SERVICE = "AI주식매매"
 
-# 저장할 항목 정의: (키 이름, 설명, 입력 마스킹 여부)
+# KIS API 항목 (연결 테스트 필요): (키 이름, 설명, 입력 마스킹 여부)
 _ITEMS = [
     ("KIS_APP_KEY",    "KIS API 앱키         (KIS 개발자센터 → 앱 관리)", True),
     ("KIS_APP_SECRET", "KIS API 앱시크릿     (KIS 개발자센터 → 앱 관리)", True),
     ("KIS_ACCOUNT_NO", "계좌번호             (형식: 12345678-01)",         False),
     ("KIS_HTS_ID",     "로그인 ID            (MTS/홈페이지 로그인 ID)",    False),
 ]
+
+# 텔레그램 항목 (연결 테스트 없이 단순 로드): 키 이름 목록
+_TELEGRAM_KEYS = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
 
 MAX_ATTEMPTS = 3  # 연결 테스트 최대 재시도 횟수
 
@@ -78,10 +83,18 @@ def inject_to_env(reset_keys: list[str] | None = None):
     """
     Keychain에서 로드하여 현재 프로세스 환경변수에 주입.
     모든 스크립트의 진입점에서 호출하면 됨.
+    - KIS 항목: 없으면 입력 받아 연결 테스트 후 저장
+    - 텔레그램 항목: 있으면 그대로 주입 (없어도 오류 없음)
     """
     secrets = get_secrets(reset_keys=reset_keys)
     for k, v in secrets.items():
         os.environ[k] = v
+
+    # 텔레그램 항목 별도 로드 (연결 테스트 없이)
+    for key in _TELEGRAM_KEYS:
+        val = keyring.get_password(_SERVICE, key)
+        if val:
+            os.environ[key] = val
 
 
 def show_status():
@@ -98,9 +111,18 @@ def show_status():
         else:
             print(f"  ❌ {key:<20} (미설정)")
             all_ok = False
+    print()
+    print("  📱 텔레그램")
+    for key in _TELEGRAM_KEYS:
+        val = keyring.get_password(_SERVICE, key)
+        if val:
+            masked = val[:4] + "*" * min(len(val) - 4, 8) if len(val) > 4 else "****"
+            print(f"  ✅ {key:<20} {masked}")
+        else:
+            print(f"  ⚠️  {key:<20} (미설정 — setup_telegram.py 실행)")
     print("-" * 55)
     if all_ok:
-        print("  모든 항목이 설정되어 있습니다.")
+        print("  KIS 항목이 모두 설정되어 있습니다.")
     else:
         print("  ⚠️  미설정 항목이 있습니다. --reset 으로 입력하세요.")
     print()

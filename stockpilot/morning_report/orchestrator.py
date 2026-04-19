@@ -110,7 +110,7 @@ def cmd_balance():
         pnl_emoji = "🔴" if eval_pnl < 0 else "🟢"
         lines = [
             f"💼 잔고 현황 ({datetime.now().strftime('%H:%M')})",
-            "=" * 24,
+            "―――――――――――――――",
             f"💰 총평가금액: {net_asset:,.0f}원",
             f"📈 유가평가:   {stock_eval:,.0f}원",
             f"{pnl_emoji} 평가손익:   {eval_pnl:+,.0f}원",
@@ -141,7 +141,7 @@ def cmd_state():
 
         lines = [
             f"📊 오늘의 상태 ({today})",
-            "=" * 24,
+            "―――――――――――――――",
         ]
 
         # 시장
@@ -191,13 +191,13 @@ def cmd_discovery():
         import importlib.util, subprocess
         script = _ROOT / "morning_report" / "stock_discovery.py"
         result = subprocess.run(
-            [str(_ROOT / "venv" / "bin" / "python3"), str(script)],
+            [str(_ROOT / "venv" / "bin" / "python3"), str(script), "--force"],
             capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:
             send_text(f"❌ 발굴 실패\n{result.stderr[-500:]}")
         else:
-            send_text("✅ 종목 발굴 완료 — 결과를 위에서 확인하세요.")
+            send_text("✅ 종목 발굴 완료 — 위 결과를 확인하세요.")
     except Exception as e:
         send_text(f"❌ 발굴 실행 오류: {e}")
 
@@ -206,7 +206,7 @@ def cmd_help():
     """명령어 목록."""
     msg = (
         "📋 사용 가능한 명령어\n"
-        "=" * 24 + "\n"
+        "\n"
         "/잔고    — KIS 잔고 즉시 조회\n"
         "/상태    — 오늘 시장/시그널 요약\n"
         "/발굴    — 종목 발굴 즉시 실행\n"

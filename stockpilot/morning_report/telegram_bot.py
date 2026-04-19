@@ -57,7 +57,13 @@ def run(once: bool = False):
 
     from orchestrator import handle_command
 
+    # 시작 시 기존 메시지 건너뛰기 — timeout=0으로 현재 대기 중인 업데이트만 조회 후 offset 갱신
     offset = 0
+    pending = _get_updates(bot_token, offset=0, timeout=0)
+    if pending:
+        offset = pending[-1]["update_id"] + 1
+        print(f"[bot] 기존 메시지 {len(pending)}개 건너뜀 (offset={offset})", file=sys.stderr)
+
     retry_delay = 5
 
     while True:
