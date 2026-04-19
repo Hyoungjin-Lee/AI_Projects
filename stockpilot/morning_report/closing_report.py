@@ -31,6 +31,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
+from state_manager import StateManager
 
 _WEEKDAYS = {0, 1, 2, 3, 4}
 _JOURNAL_DIR = _ROOT / "reports" / "journal"
@@ -118,6 +119,27 @@ def run(dry_run: bool = False):
         ohlcv = daily_data.get(code)
         analysis = analysis_results.get(code)
         stock_strategies[code] = _build_stock_strategy(h, ohlcv, analysis)
+
+    # ── state 기록 ────────────────────────────────────────────────────────────
+    try:
+        state = StateManager()
+        # 장마감 기준 시그널 업데이트
+        holdings_signals = {
+            h["code"]: {
+                "signal":  (analysis_results.get(h["code"]) or {}).get("verdict", "WATCH"),
+                "pnl_pct": h.get("pnl_pct", 0.0),
+            }
+            for h in holdings
+        }
+        state.update("holdings", holdings_signals, caller="closing_report")
+        # 거래량 급등 종목 기록
+        for h in holdings:
+            ohlcv = daily_data.get(h["code"]) or {}
+            if ohlcv.get("vol_ratio", 0) >= 2.5:
+                state.set_alert("vol_spike", h["code"], caller="closing_report")
+        print("[state] 장마감 상태 기록 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
 
     # ── 4. 보고서 생성 + 일지 저장 + 텔레그램 전송 ───────────────────────────
     print("[4/4] 결산 보고서 생성 중...", file=sys.stderr)

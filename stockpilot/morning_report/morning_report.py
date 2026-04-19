@@ -31,6 +31,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
+from state_manager import StateManager
 
 # 거래일 여부 체크용 (공휴일은 별도 관리 없이 KIS 응답으로 감지)
 _WEEKDAYS = {0, 1, 2, 3, 4}   # 월~금
@@ -131,6 +132,26 @@ def run(dry_run: bool = False):
     # ── 4. 보고서 생성 ────────────────────────────────────────────────────────
     print("[4/4] 보고서 생성 중...", file=sys.stderr)
     report = _build_report(today_str, holdings, analysis_results, weekly_results, cash_info, ext_data, balance_raw)
+
+    # ── state 기록 ───────────────────────────────────────────────────────────
+    try:
+        state = StateManager()
+        state.update("market", {
+            "us_sentiment": ext_data.get("us_market", {}).get("sp500_chg", None),
+            "usd_krw":      ext_data.get("fx", {}).get("usd_krw"),
+            "fear_greed":   ext_data.get("fear_greed", {}).get("score"),
+        }, caller="morning_report")
+        holdings_signals = {
+            h["code"]: {
+                "signal":  (analysis_results.get(h["code"]) or {}).get("verdict", "WATCH"),
+                "pnl_pct": h.get("pnl_pct", 0.0),
+            }
+            for h in holdings
+        }
+        state.update("holdings", holdings_signals, caller="morning_report")
+        print("[state] 모닝 브리핑 상태 기록 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
 
     if dry_run:
         print("\n" + "=" * 50)

@@ -37,6 +37,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
+from state_manager import StateManager
 
 _WATCHLIST_FILE = _ROOT / "data" / "watchlist.json"
 
@@ -194,6 +195,14 @@ def run(dry_run: bool = False, show: bool = False):
     os.replace(tmp_path, _WATCHLIST_FILE)
 
     print(f"[완료] watchlist.json 저장: {_WATCHLIST_FILE}", file=sys.stderr)
+
+    # ── state 기록 ────────────────────────────────────────────────────────────
+    try:
+        state = StateManager()
+        state.update("watchlist_changed", bool(added or removed), caller="watchlist_sync")
+        print("[state] watchlist 변경 여부 기록 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
     print(f"       {datetime.now().strftime('%Y-%m-%d %H:%M')} 기준 {len(final_list)}개 종목", file=sys.stderr)
 
 

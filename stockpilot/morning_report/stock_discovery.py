@@ -35,6 +35,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
+from state_manager import StateManager
 
 _WATCHLIST_FILE  = _ROOT / "data" / "watchlist.json"
 _MIN_MKTCAP_100M = 1000   # 시총 1000억 이상 (단위: 억원)
@@ -110,6 +111,25 @@ def run(dry_run: bool = False):
     # ── 4. 섹터별 압축 추천 ───────────────────────────────────────────────────
     print("[4/4] 추천 종목 선정 중...", file=sys.stderr)
     recommendations = _select_recommendations(candidates)
+
+    # ── state 기록 ────────────────────────────────────────────────────────────
+    try:
+        state = StateManager()
+        # 미국 시장 방향 기록
+        market = us_data.get("market", {})
+        state.update("market", {
+            "us_sentiment": us_sentiment,
+            "usd_krw":      us_data.get("fx", {}).get("usd_krw"),
+            "fear_greed":   us_data.get("fear_greed", {}).get("score"),
+        }, caller="stock_discovery")
+        # 발굴 결과 기록
+        state.update("discovery", {
+            "candidates": [r["code"] for r in recommendations],
+            "top_pick":   recommendations[0]["code"] if recommendations else None,
+        }, caller="stock_discovery")
+        print("[state] 종목 발굴 상태 기록 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
 
     # ── 5. 보고서 생성 + 전송 ─────────────────────────────────────────────────
     report = _build_discovery_report(today_str, us_data, us_sentiment, recommendations, len(watchlist))

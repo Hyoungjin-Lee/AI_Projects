@@ -1,6 +1,6 @@
-# 🤝 AI 주식 매매 시스템 — Handoff 문서
+# 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-19 (Stage 12~13 완료 — v1.0.0 배포 완료)
+> 최종 업데이트: 2026-04-19 (v2.0 에이전트 아키텍처 완료)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -8,7 +8,7 @@
 ## 1. 프로젝트 개요
 
 한국투자증권(KIS) Open API 기반 주식 자동화 시스템.
-매일 평일 자동으로 **텔레그램**으로 브리핑 전송. (카카오톡 → 텔레그램 전환 완료)
+평일 자동 브리핑 + **텔레그램 양방향 명령** 지원.
 
 - **프로젝트 경로:** `/Users/geenya/projects/AI_Projects/stockpilot`
 - **Python 환경:** `venv/` (Python 3.14)
@@ -20,11 +20,12 @@
 
 | 시각 | 스크립트 | 내용 |
 |------|----------|------|
-| 08:20 | `watchlist_sync.py` | KIS HTS 관심종목 → watchlist.json 동기화 |
-| 08:30 | `morning_report.py` | 모닝 브리핑 텔레그램 전송 |
-| 09:10 | `intraday_report.py` | 장초기 현황 텔레그램 전송 |
-| 20:30 | `closing_report.py` | 장마감 결산 텔레그램 전송 |
-| 23:30 | `stock_discovery.py` | 야간 종목 발굴 텔레그램 전송 (월~토) |
+| 08:20 | `watchlist_sync.py` | KIS HTS 관심종목 → watchlist.json + state 기록 |
+| 08:30 | `morning_report.py` | 모닝 브리핑 텔레그램 전송 + state 기록 |
+| 09:10 | `intraday_report.py` | 장초기 현황 텔레그램 전송 + state 기록 |
+| 20:30 | `closing_report.py` | 장마감 결산 텔레그램 전송 + state 기록 |
+| 23:30 | `stock_discovery.py` | 야간 종목 발굴 텔레그램 전송 + state 기록 (월~토) |
+| 상시 | `telegram_bot.py` | 텔레그램 명령 수신 (부팅 시 자동 시작) |
 
 ---
 
@@ -33,35 +34,44 @@
 ```
 stockpilot/
 ├── morning_report/
-│   ├── morning_report.py       # 모닝 브리핑
-│   ├── intraday_report.py      # 장초기 브리핑
-│   ├── closing_report.py       # 장마감 결산 ← 오늘 대폭 개선
-│   ├── stock_discovery.py      # 야간 종목 발굴
-│   ├── watchlist_sync.py       # 관심종목 동기화
-│   ├── telegram_sender.py      # 텔레그램 전송 모듈 (신규)
-│   ├── setup_telegram.py       # 텔레그램 최초 설정 도우미 (신규)
-│   ├── _kakao_sender.py        # 카카오톡 전송 모듈 (보관용)
-│   ├── _setup_kakao.py         # 카카오 설정 (보관용)
+│   ├── morning_report.py       # 모닝 브리핑 (state 기록 포함)
+│   ├── intraday_report.py      # 장초기 브리핑 (state 기록 포함)
+│   ├── closing_report.py       # 장마감 결산 (state 기록 포함)
+│   ├── stock_discovery.py      # 야간 종목 발굴 (state 기록 포함)
+│   ├── watchlist_sync.py       # 관심종목 동기화 (state 기록 포함)
+│   ├── telegram_sender.py      # 텔레그램 단방향 전송
+│   ├── telegram_bot.py         # 텔레그램 봇 데몬 (양방향 수신) ← NEW
+│   ├── orchestrator.py         # 명령 라우팅 (/잔고 /상태 /발굴 /도움말) ← NEW
+│   ├── state_manager.py        # 에이전트 간 공유 상태 관리 ← NEW
 │   ├── keychain_manager.py     # macOS Keychain 인증정보 관리
-│   └── setup_scheduler.sh      # launchd 스케줄러 등록
+│   └── setup_telegram.py       # 텔레그램 최초 설정 도우미
 ├── .skills/
-│   ├── kis-api/scripts/kis_client.py   # KIS API 클라이언트 ← 오늘 개선
-│   ├── stock-analysis/                 # 기술적 분석 스킬
-│   └── trading-report/                 # 보고서 생성 스킬
+│   ├── kis-api/scripts/kis_client.py
+│   ├── stock-analysis/
+│   └── trading-report/
 ├── data/
-│   ├── watchlist.json          # 관심종목 (LNG/건설 섹터)
-│   └── cache/                  # 토큰 캐시
+│   ├── watchlist.json          # 관심종목
+│   ├── daily_state.json        # 에이전트 간 공유 상태 ← NEW
+│   └── cache/                  # KIS 토큰 캐시
 ├── docs/
-│   ├── api/                    # KIS 전체 API 문서 xlsx
-│   └── manual/                 # 운영자/사용자 매뉴얼
-├── reports/journal/            # 매매일지 자동 저장
-├── logs/                       # 자동 실행 로그
-└── .env                        # 환경변수 (민감정보는 Keychain)
+│   ├── 06_agent_architecture/  # v2.0 에이전트 설계 문서 ← NEW
+│   ├── 05_qa_release/          # QA 리포트
+│   └── api/                    # KIS API xlsx 문서
+├── logs/
+│   ├── stockbot.log            # telegram_bot.py stdout ← NEW
+│   └── stockbot_error.log      # telegram_bot.py stderr ← NEW
+└── ~/Library/LaunchAgents/
+    ├── com.aigeenya.stockbot.plist     # 봇 데몬 (상시) ← NEW
+    ├── com.aigeenya.stockreport.plist  # morning
+    ├── com.aigeenya.stockreport.closing.plist
+    ├── com.aigeenya.stockreport.discovery.plist
+    ├── com.aigeenya.stockreport.intraday.plist
+    └── com.aigeenya.stockreport.watchlist.plist
 ```
 
 ---
 
-## 4. 보안 구조 (Keychain 통합 완료)
+## 4. 보안 구조 (Keychain 통합)
 
 ### Keychain 저장 항목 (서비스명: `AI주식매매`)
 
@@ -82,87 +92,89 @@ inject_to_env()  # Keychain → os.environ 자동 주입
 
 ---
 
-## 5. 텔레그램 전환 현황 (2026-04-18 완료)
+## 5. v2.0 에이전트 아키텍처 (2026-04-19 완료)
 
-| Stage | 상태 | 산출물 |
-|-------|------|--------|
-| 1 브레인스토밍 | ✅ 완료 | `docs/01_brainstorm/brainstorm.md` |
-| 2~4 기획 통합 | ✅ 완료 | `docs/02_planning/plan_final.md` |
-| 5 기술 설계 | ✅ 완료 | `docs/03_design/technical_design.md` |
-| 8 구현 (Codex) | ✅ 완료 | `morning_report/telegram_sender.py` |
-| 9 코드 리뷰 | ✅ 완료 | `docs/04_implementation/code_review.md` |
-| 10 수정 반영 | ✅ 완료 | `docs/04_implementation/revise_request.md` |
-| 11 최종 검증 | ✅ 완료 | Opus XHigh — 배포 가능 판정 |
+### 구현된 기능
 
-**텔레그램 봇:** `@geenya_stock_bot` (Stock Pilot)
-**실제 전송 테스트:** ✅ 성공 확인 (2026-04-18 17:03)
+| 구성요소 | 파일 | 상태 |
+|---------|------|------|
+| 공유 상태 | `state_manager.py` + `data/daily_state.json` | ✅ 완료 |
+| 5개 스크립트 state 연동 | morning/intraday/closing/discovery/watchlist | ✅ 완료 |
+| 텔레그램 명령 수신 | `telegram_bot.py` | ✅ 완료 |
+| 명령 라우팅 | `orchestrator.py` | ✅ 완료 |
+| 봇 데몬 launchd | `com.aigeenya.stockbot.plist` | ✅ 완료 |
+| AGENTS.md 문서화 | `AGENTS.md` | ✅ 완료 |
+| WORKFLOW.md 독립검증 프로토콜 | 섹션 10 | ✅ 완료 |
+
+### 사용 가능한 텔레그램 명령어
+
+```
+/잔고    — KIS 잔고 즉시 조회
+/상태    — 오늘 시장/시그널 요약
+/발굴    — 종목 발굴 즉시 실행
+/도움말  — 명령어 목록
+```
+
+### daily_state.json 구조
+
+```json
+{
+  "date": "2026-04-21",
+  "market": { "us_sentiment": "...", "usd_krw": 0, "fear_greed": "..." },
+  "holdings": { "종목코드": { "signal": "BUY/SELL/HOLD", "pnl_pct": 0.0 } },
+  "alerts": { "intraday": "...", "vol_spike": [] },
+  "discovery": { "candidates": [], "top_pick": "..." },
+  "watchlist_changed": false
+}
+```
 
 ---
 
-## 6. 오늘(2026-04-18) 작업 히스토리
+## 6. 수동 설정 필요 항목 (다음 로그인 시)
 
-### 6-1. 텔레그램 봇 연동 완료
-- BotFather에서 `@geenya_stock_bot` 생성
-- `setup_telegram.py` 실행 → Keychain 저장 → 테스트 메시지 수신 확인
-- 4개 보고서 스크립트 import 교체 완료 (`kakao_sender` → `telegram_sender`)
+### 6-1. 텔레그램 봇 데몬 launchd 등록
 
-### 6-2. Stage 11 최종 검증 (Opus XHigh)
-- 보안/기능/통합/에러처리/코드품질 전 항목 통과
-- **판정: 즉시 배포 가능**
-
-### 6-3. closing_report.py 결산 요약 섹션 대폭 개선
-**변경 전:**
-```
-주식 평가액:  8,443,500원
-예수금(현금): 4,751,541원
-총자산:      13,195,041원  ← 잘못된 합산
+```bash
+launchctl load ~/Library/LaunchAgents/com.aigeenya.stockbot.plist
+launchctl list | grep stockbot  # 확인
 ```
 
-**변경 후:**
-```
-💰 총자산
-  총평가금액:   10,497,239원   ← API nass_amt 기준
-  유가평가금액:  8,443,500원
-  전일순자산:   10,623,671원
-  🔴 자산증감:    -126,432원 (-1.19%)
+### 6-2. 기존 5개 plist 경로 변경 후 재등록
 
-📊 정산현황
-  금일매수:      3,680,850원
-  금일매도:      2,306,000원
-  금일제비용:        5,382원
-  🔴 평가손익합계: -250,350원 (-2.88%)
-
-💵 예수금
-  예수금(총):    4,751,541원
-  D+1 정산:     3,433,971원
-  D+2 정산:     2,053,739원
-  주문가능:      2,008,118원   ← 앱과 정확히 일치
+```bash
+# 경로가 변경되었으므로 unload → load 필요
+launchctl unload ~/Library/LaunchAgents/com.aigeenya.stockreport.plist
+launchctl load   ~/Library/LaunchAgents/com.aigeenya.stockreport.plist
+# (나머지 4개도 동일하게)
 ```
 
-### 6-4. KIS API 필드 정확화 (엑셀 문서 기반)
-- `TTTC8434R` output2 필드 전수 확인 → D+2 필드명 오류 수정 (`prvs_rcdl_excc_amt`)
-- `TTTC0869R` (주식통합증거금현황) 추가 — `stck_itgr_cash100_ord_psbl_amt` 사용
-- 주문가능: 현금 기준 보수적 표시 (미수/신용 미포함 정책 확정)
-- 출금가능: KIS 공개 API 미제공 확인 → 항목 제외 결정
+### 6-3. GitHub push (최신 변경사항)
 
-### 6-5. kis_client.py 개선
-- `get_orderable_cash()` 메서드 추가 (TTTC0869R 호출)
-- `stck_itgr_cash100_ord_psbl_amt` 우선, fallback `stck_cash_ord_psbl_amt`
+```bash
+cd /Users/geenya/projects/AI_Projects/stockpilot
+git add -p  # 변경된 파일 선택적 스테이징
+git commit -m "feat: v2.0 에이전트 아키텍처 — 공유상태/텔레그램봇/오케스트레이터"
+git push origin main
+```
 
 ---
 
 ## 7. 다음 세션에서 할 작업
 
-> **현재 상태: v1.0.0 배포 완료 ✅ — 카카오→텔레그램 전환 프로젝트 전 스테이지 종료**
+> **현재 상태: v2.0 에이전트 아키텍처 구현 완료 ✅**
+> **월요일(2026-04-21) 자동 실행으로 전체 검증 예정**
 
-### 운영 모니터링 (다음 주)
-- [ ] 월요일(2026-04-21) 장마감 후 `closing_report.py` 자동 실행 결과 확인
-- [ ] `morning_report.py` dry-run 으로 리포트 품질 점검
-- [ ] `stock_discovery.py` 텔레그램 전송 확인
+### 운영 모니터링 (2026-04-21 이후)
+- [ ] `morning_report.py` 08:30 자동 실행 확인
+- [ ] `telegram_bot.py` 봇 데몬 상시 실행 확인 (`launchctl list | grep stockbot`)
+- [ ] `/잔고`, `/상태` 명령 텔레그램에서 테스트
+- [ ] `closing_report.py` 20:30 자동 실행 + state 기록 확인
+- [ ] `stock_discovery.py` 23:30 자동 실행 확인
 
 ### 다음 프로젝트 후보
-- [ ] 텔레그램 양방향 명령 (`/잔고`, `/매수`, `/매도`) 구현
-- [ ] stock_discovery 스크리닝 조건 고도화
+- [ ] stock_discovery 스크리닝 조건 고도화 (기술적 지표 추가)
+- [ ] 보유 종목 자동 매도 시그널 (Phase 2 — 실주문 포함)
+- [ ] 텔레그램 `/매수`, `/매도` 명령 구현 (Phase 2)
 
 ---
 
@@ -176,13 +188,20 @@ venv/bin/python3 morning_report/morning_report.py --dry-run
 venv/bin/python3 morning_report/closing_report.py --dry-run
 venv/bin/python3 morning_report/intraday_report.py --dry-run
 
-# 텔레그램 직접 테스트
-venv/bin/python3 morning_report/telegram_sender.py
+# 봇 1회 테스트 (텔레그램 명령 수신 확인)
+venv/bin/python3 morning_report/telegram_bot.py --once
+
+# 공유 상태 확인
+venv/bin/python3 morning_report/state_manager.py
 
 # Keychain 확인
 venv/bin/python3 morning_report/keychain_manager.py
 
+# 봇 데몬 상태 확인
+launchctl list | grep stockbot
+
 # 로그 확인
+tail -50 logs/stockbot_error.log
 tail -50 logs/closing_report.log
 ```
 
@@ -192,21 +211,26 @@ tail -50 logs/closing_report.log
 
 1. 장마감 시간 변경: 16:00 → 20:30
 2. watchlist 자동 동기화: KIS HTS 관심종목 API 연동
-3. macOS Keychain 보안 통합 (KIS + 카카오 토큰)
-4. 연결 테스트 흐름: 입력 → 잔고조회 → 관심종목조회 → 성공 시 저장
-5. closing_report.py: OHLCV + 거래량 + 내일 전략 + 매매일지
-6. 스케줄러 5개 launchd 등록 완료
-7. 운영자/사용자 매뉴얼 작성
-8. Opus 4.7 보안 검증 + P1~P5 전체 적용
-9. CLAUDE.md 생성 — 핵심 지침 집약
-10. morning_report/ 전 스크립트 py_compile 문법 검사 통과
-11. **카카오톡 → 텔레그램 전환 완료** (Stage 1~11 전체)
-12. **closing_report 결산 요약 섹션 개선** — 총자산/정산현황/예수금 분리
-13. **KIS API 필드 정확화** — TTTC8434R + TTTC0869R 조합으로 주문가능 앱 일치
-14. **morning_report / intraday_report 예수금 섹션 개선** — closing_report와 동일한 총자산/정산현황/예수금 분리 표시 통일
-15. **Stage 12 QA & 릴리스** — 전 스크립트 문법검사 통과, 릴리스 노트 작성
-16. **Stage 13 배포 & 아카이브** — v1.0.0 배포 완료, 산출물 아카이브
+3. macOS Keychain 보안 통합
+4. closing_report.py: OHLCV + 거래량 + 내일 전략 + 매매일지
+5. 스케줄러 5개 launchd 등록 완료
+6. 운영자/사용자 매뉴얼 작성
+7. Opus 보안 검증 완료
+8. AGENTS.md (구 CLAUDE.md) 생성
+9. **카카오톡 → 텔레그램 전환 완료** (v1.0.0 — 2026-04-18)
+10. **closing_report 총자산/정산현황/예수금 섹션 분리**
+11. **morning_report / intraday_report 예수금 섹션 통일**
+12. **프로젝트 경로 재구조화**: `project/stockpilot` → `projects/AI_Projects/stockpilot`
+13. **GitHub 저장소 연결**: `Hyoungjin-Lee/AI_Projects` 최초 push
+14. **v2.0 에이전트 아키텍처 완료** (2026-04-19):
+    - `state_manager.py` — 에이전트 간 공유 상태
+    - 5개 스크립트 state 연동
+    - `telegram_bot.py` — 텔레그램 명령 수신 데몬
+    - `orchestrator.py` — 명령 라우팅 (`/잔고` `/상태` `/발굴`)
+    - `com.aigeenya.stockbot.plist` — 부팅 시 자동 시작
+    - AGENTS.md 전면 재작성 (v2.0 반영)
+    - WORKFLOW.md 독립 검증 프로토콜 추가 (섹션 10)
 
 ---
 
-*자동 생성 | AI 주식 매매 시스템*
+*자동 생성 | stockpilot v2.0 — AI 주식 자동화 시스템*

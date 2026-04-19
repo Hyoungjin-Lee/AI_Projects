@@ -28,6 +28,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
+from state_manager import StateManager
 
 _WEEKDAYS = {0, 1, 2, 3, 4}
 
@@ -80,6 +81,25 @@ def run(dry_run: bool = False):
         except Exception as e:
             print(f"  ⚠️  {name}({code}) 분봉 분석 실패: {e}", file=sys.stderr)
             intraday_results[code] = None
+
+    # ── state 기록 ────────────────────────────────────────────────────────────
+    try:
+        state = StateManager()
+        # 하락 출발 종목 알림 기록
+        drop_alerts = [
+            h["name"] for h in holdings
+            if (intraday_results.get(h["code"]) or {}).get("direction") == "하락출발"
+        ]
+        if drop_alerts:
+            state.set_alert("intraday", f"하락출발: {', '.join(drop_alerts)}", caller="intraday_report")
+        # 거래량 급증 종목 기록
+        for h in holdings:
+            r = intraday_results.get(h["code"]) or {}
+            if r.get("vol_bars", 0) > 0:
+                pass  # vol_ratio는 분봉 집계라 별도 처리
+        print("[state] 장초기 상태 기록 완료", file=sys.stderr)
+    except Exception as e:
+        print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
 
     # ── 3. 보고서 생성 + 전송 ────────────────────────────────────────────────
     print("[3/3] 장초기 보고서 생성 중...", file=sys.stderr)
