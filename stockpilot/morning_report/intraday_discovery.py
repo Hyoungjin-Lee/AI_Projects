@@ -201,7 +201,9 @@ def _run_round2(client, state: StateManager, dry_run: bool = False, debug: bool 
     }
     state.update("intraday_discovery", {"round2": round2}, caller="intraday_discovery")
 
-    message = _build_message(round2["time"], top_picks, len(scored))
+    _save_discovery_log(scored, volume_rows)
+
+    message = _build_message(round2["time"], top_picks, len(scored), all_scored=scored)
     if dry_run:
         print("\n" + "=" * 50)
         print(message)
@@ -471,19 +473,23 @@ def _score_candidate(
     if None in (pow_1, pow_2, flc_1, flc_2, vol_1, vol_2):
         return None
 
+    # 체결강도 절대값 필터 — 110 미만은 매도우위 or 중립, 발굴 의미 없음
+    if pow_2 < 110:
+        return None
+
+    # 등락률 최소값 필터 — 2% 미만 약세 종목 제외
+    if flc_2 < 2.0:
+        return None
+
     score = 0
     reasons = []
 
     if pow_2 >= 130:
         score += 3
-    elif pow_2 >= 110:
+    elif pow_2 >= 120:
         score += 2
-    elif pow_2 >= 100:
+    else:  # 110 ~ 119
         score += 1
-    elif pow_2 > pow_1:
-        score += 1
-    else:
-        return None
 
     flc_delta = flc_2 - flc_1
     if flc_delta > 0:
@@ -518,7 +524,12 @@ def _score_candidate(
     }
 
 
-def _build_message(time_str: str, top_picks: list[dict[str, Any]], candidate_count: int) -> str:
+def _build_message(
+    time_str: str,
+    top_picks: list[dict[str, Any]],
+    candidate_count: int,
+    all_scored: list[dict[str, Any]] | None = None,
+) -> str:
     lines = [
         f"🔍 장초기 종목 발굴 ({time_str})",
         "―――――――――――――――",
@@ -546,6 +557,17 @@ def _build_message(time_str: str, top_picks: list[dict[str, Any]], candidate_cou
     if lines[-1] == "":
         lines.pop()
 
+    # 추가 관심 후보 (4위 이상인 경우)
+    if all_scored and len(all_scored) >= 4:
+        extra = all_scored[3:5]  # 4위, 5위 (최대 2개)
+        lines.append("―――――――――――――――")
+        lines.append("📋 추가 관심 후보")
+        for rank, item in enumerate(extra, start=4):
+            lines.append(
+                f"  {rank}위 {item['name']} ({item['code']}) "
+                f"— 체결강도: {item['pow_2']:.0f} | {item['flc_2']:+.1f}%"
+            )
+
     lines.extend(
         [
             "―――――――――――――――",
@@ -568,6 +590,66 @@ def _trend_mark(delta: float) -> str:
     if delta < 0:
         return "↓"
     return ""
+
+
+def _save_discovery_log(scored: list[dict], volume_rows: list[dict]) -> None:
+    """발굴 결과를 data/discovery_log.json에 기록. 실패해도 예외 없이 경고만 출력."""
+    try:
+        from datetime import date as _date
+        from datetime import timedelta
+        import json as _json
+
+        log_file = _ROOT / "data" / "discovery_log.json"
+
+        # 기존 로그 읽기
+        if log_file.exists():
+            try:
+                existing = _json.loads(log_file.read_text(encoding="utf-8"))
+                if not isinstance(existing, list):
+                    existing = []
+            except Exception:
+                existing = []
+        else:
+            existing = []
+
+        # disc_price 매핑: volume_rows의 stck_prpr 필드
+        price_map = _extract_metric_map(volume_rows, "stck_prpr")
+
+        today = _date.today().isoformat()
+        disc_time = datetime.now().strftime("%H:%M")
+
+        # 오늘 날짜 기존 항목 제거 (재실행 시 덮어쓰기)
+        existing = [e for e in existing if e.get("date") != today]
+
+        # 새 항목 추가
+        for item in scored:
+            existing.append({
+                "date": today,
+                "disc_time": disc_time,
+                "code": item["code"],
+                "name": item["name"],
+                "disc_price": int(price_map.get(item["code"], 0)),
+                "score": item["score"],
+                "pow_2": round(item["pow_2"], 1),
+                "flc_2": round(item["flc_2"], 2),
+                "close_price": None,
+                "return_pct": None,
+                "updated_at": None,
+            })
+
+        # 30일 이전 항목 삭제
+        cutoff = (_date.today() - timedelta(days=30)).isoformat()
+        existing = [e for e in existing if e.get("date", "") >= cutoff]
+
+        # 저장
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.write_text(
+            _json.dumps(existing, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        print(f"[발굴로그] {len(scored)}개 종목 기록 완료 → {log_file.name}", file=sys.stderr)
+    except Exception as e:
+        print(f"[발굴로그] 저장 실패 (무시): {e}", file=sys.stderr)
 
 
 def main() -> int:

@@ -44,11 +44,12 @@
 
 | # | 단계 | 담당자 | 모델 | 노력 | 입력 | 산출물 | 예상 시간 |
 |---|------|--------|------|------|------|--------|----------|
-| 1 | **아이디어 구상** | Claude | Opus | Medium | 사용자 요청/요구사항 | `docs/01_brainstorm/brainstorm.md` | 15-30분 |
+| 1 | **아이디어 구상** ⚠️ | Claude + 형진님 | Opus | Medium | 사용자 요청/요구사항 | `docs/01_brainstorm/brainstorm.md` | 15-30분 |
 | 2 | **계획 초안** | Claude | Sonnet | Medium | 아이디어 구상 결과 | `docs/02_planning/plan_draft.md` | 15-30분 |
 | 3 | **계획 검토** | Claude | Sonnet | High | 계획 초안 | `docs/02_planning/plan_review.md` (피드백) | 10-20분 |
-| 4 | **계획 통합** | Claude | Sonnet | Medium | 초안 + 검토 피드백 | `docs/02_planning/plan_final.md` | 10-15분 |
-| 5 | **기술 설계** | Claude | Opus | High | 확정된 계획 | `docs/03_design/technical_design.md` | 30-60분 |
+| 4 | **계획 통합** ⚠️ | Claude | Sonnet | Medium | 초안 + 검토 피드백 | `docs/02_planning/plan_final.md` | 10-15분 |
+| 4.5 | **형진님 승인** 🔴 | 형진님 | - | - | plan_final.md | 승인 확인 | - |
+| 5 | **기술 설계** | Claude | Opus | High | 확정된 계획 + 승인 | `docs/03_design/technical_design.md` | 30-60분 |
 | 6 | **UI/UX 요구사항** (선택) | Claude | Sonnet | Medium | 기술 설계 (프론트엔드 필요시) | `docs/03_design/ui_requirements.md` | 15-30분 |
 | 7 | **UI 플로우 설계** (선택) | Claude | Sonnet | Medium | UI 요구사항 | `docs/03_design/ui_flow.md` + 와이어프레임 | 20-40분 |
 | 8 | **구현** | Codex | - | High | 기술 설계 + UI 플로우 (있을 경우) | 코드 + 테스트 + PR/커밋 | 1-8시간 |

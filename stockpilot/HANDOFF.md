@@ -1,6 +1,6 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-21 (v2.4 — 스크리닝 완화 + closing_report 총자산 동기화)
+> 최종 업데이트: 2026-04-21 (v2.5 — Phase 1 발굴 성과 추적 DB + 메시지 개선)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -206,18 +206,23 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ---
 
-## 8-1. 완료된 이슈 (v2.4, 2026-04-21)
+## 8-1. 완료된 이슈 (v2.4~v2.5, 2026-04-21)
 
 ### ✅ 이슈 2 — stock_discovery 스크리닝 조건 완화 (완료)
-
-- `_MIN_VOL_RATIO` 0.8 → 0.5 완화 (야간 실행 특성 반영)
+- `_MIN_VOL_RATIO` 0.8 → 0.5 완화
 - `_screen_stock()` HOLD confidence 기준 0.5 → 0.4 완화
 
 ### ✅ 이슈 3 — closing_report 총자산 로직 동기화 (완료)
+- `display_net` 기준을 `tot_evlu_amt`(총평가금액)로 변경
+- 자산증감 ±5% 초과 시 `⚠️` 경고 + 이체금액 역산 로직 이식
 
-- `display_net` 기준을 `tot_evlu_amt`(총평가금액)로 변경 (기존: `nass_amt` 순자산)
-- 자산증감 ±5% 초과 시 `⚠️` 경고 로직 추가
-- `financials.eval_pnl` state 기반 이체금액 역산 로직 이식
+### ✅ Phase 1 — intraday_discovery 고도화 (완료, Stage 11 검증 통과)
+- 필터 강화: 체결강도 110 미만 제외, 등락률 2% 미만 제외
+- 발굴 성과 추적 DB: `data/discovery_log.json` 자동 기록
+- closing_report 장마감 시 종가·수익률 자동 업데이트
+- 텔레그램 메시지 4~5위 "추가 관심 후보" 섹션 추가
+- 설계 문서: `docs/08_phase1_intraday/`
+- 최종 검증: `docs/notes/final_validation.md`
 
 ---
 
@@ -225,35 +230,22 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 | Phase | 내용 | 상태 |
 |-------|------|------|
-| **Phase 1** | intraday_discovery 고도화 (발굴 조건 정밀화) | 🔜 다음 세션 |
-| **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 Phase 1 후 |
-| **Phase 3** | 보유 포지션 평단 관리 자동화 (물타기/익절/손절 계산) | 🔜 Phase 2 후 |
+| **Phase 1** | intraday_discovery 고도화 | ✅ 완료 |
+| **Phase 1.5** | 모닝 리포트에 전날 발굴 성과 요약 추가 | 🔜 데이터 쌓인 후 |
+| **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 다음 |
+| **Phase 3** | 보유 포지션 평단 관리 자동화 | 🔜 Phase 2 후 |
 | **Phase 4** | 웹 UI (전략 설정 화면) | 🔜 마지막 |
 
 ---
 
 ## 9. 다음 세션에서 할 작업
 
-### ✅ 이슈 2: stock_discovery 스크리닝 완화 (완료)
-
-- [x] `_MIN_VOL_RATIO` 0.8 → 0.5 완화
-- [x] HOLD confidence 기준 0.5 → 0.4 완화
-
-### ✅ 이슈 3: closing_report 총자산 동기화 (완료)
-
-- [x] `display_net` 기준을 `tot_evlu_amt`(총평가금액)로 변경
-- [x] 자산증감 ±5% 경고 로직 추가
-- [x] 이체금액 역산 로직 (`financials.eval_pnl` 활용) 이식
-
-### 🔴 Phase 1 — intraday_discovery 고도화
-
-- [ ] 체결강도 기준 상향 검토 (현재: 120 → 140~150?)
-- [ ] 등락률 최소값 필터 추가 (예: 3% 미만 제외)
-- [ ] 가중평균 > 현재가 필터 (오전 약세 제외)
-- [ ] 발굴 성과 추적 DB (종목별 발굴가 vs 장마감가 자동 기록)
+### 🔴 Stage 12 QA — Phase 1 실제 운영 검증
+- [ ] 내일 장 시작(09:03~09:05) round1 → round2 실행 후 `data/discovery_log.json` 생성 확인
+- [ ] 20:30 closing_report 실행 후 `close_price`, `return_pct` 업데이트 확인
+- [ ] 텔레그램 메시지에 "추가 관심 후보" 섹션 정상 표시 확인
 
 ### 🟡 Phase 2 준비 — 텔레그램 매수/매도 명령
-
 - [ ] strategy_config.json에 `position.split_entry` 구조 추가
 - [ ] 별도 계좌 분리 설계 (Keychain에 `KIS_TRADING_ACCOUNT_NO` 추가)
 - [ ] `/매수 종목코드 수량` 명령 구현
@@ -335,7 +327,7 @@ aigit_upload
 ## 📋 다음 세션 시작 프롬프트
 
 > 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
-> 마지막 갱신: 2026-04-21 (v2.4)
+> 마지막 갱신: 2026-04-21 (v2.5)
 
 ```
 stockpilot 프로젝트 이어서 진행해줘.
@@ -343,27 +335,26 @@ HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
 경로: /Users/geenya/projects/AI_Projects/stockpilot/
 
 현재 상태 요약:
-- v2.4 완료 (2026-04-21)
-- [이슈 2 완료] stock_discovery.py 스크리닝 완화
-  - _MIN_VOL_RATIO 0.8 → 0.5, HOLD confidence 0.5 → 0.4
-- [이슈 3 완료] closing_report.py 총자산 로직 동기화
-  - display_net 기준 tot_evlu_amt(총평가금액)로 변경 (기존: nass_amt 순자산)
-  - 자산증감 ±5% 경고 + 이체금액 역산 로직 이식 (morning_report와 동일)
+- v2.5 완료 (2026-04-21)
+- [Phase 1 완료] intraday_discovery 고도화 (Stage 9~11 검증 통과)
+  - 발굴 성과 추적 DB: data/discovery_log.json 자동 기록
+  - closing_report 장마감 시 종가·수익률 자동 업데이트
+  - 텔레그램 메시지 4~5위 추가 관심 후보 섹션 추가
+  - 설계 문서: docs/08_phase1_intraday/
+- CLAUDE.md에 워크플로우 역할 규칙 및 협업 체크포인트 추가
+  - Stage 1 브레인스토밍: 형진님과 대화하며 방향 잡기 (혼자 작성 금지)
+  - Stage 4 완료 후: 형진님 승인 필수, 승인 없이 Stage 5 진입 금지
 
 다음 할 작업:
-1. [Phase 1] intraday_discovery 발굴 조건 고도화
-   - 체결강도 기준 상향 검토 (현재: 120 → 140~150?)
-   - 등락률 최소값 필터 추가 (예: 3% 미만 제외)
-   - 가중평균 > 현재가 필터 (오전 약세 제외)
-   - 발굴 성과 추적 DB (종목별 발굴가 vs 장마감가 자동 기록)
-2. [Phase 2 준비] 텔레그램 /매수 /매도 명령 구현
-   - strategy_config.json에 position.split_entry 구조 추가
-   - 별도 계좌 분리 설계
+1. [Stage 12 QA] Phase 1 실제 운영 검증
+   - 장 시작(09:03~09:05) round1→round2 후 discovery_log.json 확인
+   - 20:30 closing_report 후 close_price, return_pct 업데이트 확인
+2. [Phase 2] 텔레그램 /매수 /매도 명령 구현 (Stage 1 브레인스토밍부터 시작)
 
 참고 사항:
-- 타점 계산 기준: entry_low=SMA20×1.005, entry_high=5일고가×1.005,
-  exit_low=평단×0.97, exit_high=평단×1.05 (strategy_config.json 기준)
-- 수정 후 반드시 `venv/bin/python3 -m py_compile` 문법 검사
+- 새 기능 개발 시 반드시 WORKFLOW.md Stage 1~7 순서 준수
+- Stage 1은 형진님과 대화로 시작, Stage 4 승인 후 Stage 5 진입
+- 수정 후 반드시 venv/bin/python3 -m py_compile 문법 검사
 
 어디서부터 시작할까?
 ```

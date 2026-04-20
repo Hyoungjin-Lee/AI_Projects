@@ -372,6 +372,17 @@ def _build_stock_strategy(holding: dict, ohlcv: dict | None, analysis: dict | No
 # ── 결산 보고서 빌더 ──────────────────────────────────────────────────────────
 
 def _build_closing_report(today_str, holdings, daily_data, strategies, cash_info) -> str:
+    client = None
+    try:
+        from kis_client import KISClient
+        client = KISClient()
+    except Exception as e:
+        print(f"[발굴로그] KIS 클라이언트 초기화 실패 (무시): {e}", file=sys.stderr)
+
+    # 발굴 성과 업데이트 (장마감 종가 기록)
+    if client:
+        _update_discovery_log(client)
+
     lines = []
     lines.append(f"📊 {today_str} 장마감 결산")
     lines.append(f"⏰ {datetime.now().strftime('%H:%M')} 기준")
@@ -672,6 +683,70 @@ def _safe_int(val, default=0) -> int:
         return int(str(val).replace(",", "").strip())
     except (ValueError, TypeError):
         return default
+
+
+def _update_discovery_log(client) -> None:
+    """오늘 발굴 종목의 종가를 discovery_log.json에 업데이트. 실패해도 경고만 출력."""
+    try:
+        import json as _json
+        from datetime import datetime as _dt, date as _date
+
+        log_file = _ROOT / "data" / "discovery_log.json"
+        if not log_file.exists():
+            return
+
+        log = _json.loads(log_file.read_text(encoding="utf-8"))
+        if not isinstance(log, list):
+            return
+
+        today = _date.today().isoformat()
+        updated = 0
+
+        for entry in log:
+            if entry.get("date") != today:
+                continue
+            if entry.get("close_price") is not None:
+                continue
+
+            code = entry.get("code")
+            if not code:
+                continue
+
+            try:
+                close_price = 0
+
+                if hasattr(client, "get_current_price"):
+                    price_info = client.get_current_price(code)
+                    close_price = int(_safe_float(price_info.get("stck_prpr", 0)) or 0) if isinstance(price_info, dict) else 0
+
+                # get_current_price 없으면 get_stock_info 시도
+                if close_price == 0 and hasattr(client, "get_stock_info"):
+                    info = client.get_stock_info(code)
+                    close_price = int(_safe_float(info.get("stck_prpr", 0)) or 0)
+
+                # 마지막 fallback: 일봉 최신값의 종가 사용
+                if close_price == 0:
+                    bars = client.get_daily_chart(code, days=1)
+                    if bars and isinstance(bars, list):
+                        latest = bars[0] or {}
+                        close_price = int(_safe_float(latest.get("stck_clpr", 0)) or 0)
+
+                if close_price > 0:
+                    disc_price = entry.get("disc_price", 0)
+                    entry["close_price"] = close_price
+                    entry["return_pct"] = round((close_price - disc_price) / disc_price * 100, 2) if disc_price > 0 else None
+                    entry["updated_at"] = _dt.now().strftime("%Y-%m-%dT%H:%M:%S")
+                    updated += 1
+            except Exception as e:
+                print(f"[발굴로그] {code} 종가 조회 실패: {e}", file=sys.stderr)
+
+        log_file.write_text(
+            _json.dumps(log, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        print(f"[발굴로그] 종가 업데이트 완료: {updated}개", file=sys.stderr)
+    except Exception as e:
+        print(f"[발굴로그] 업데이트 실패 (무시): {e}", file=sys.stderr)
 
 
 def _parse_holdings(balance_raw) -> list:

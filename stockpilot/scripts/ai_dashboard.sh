@@ -156,6 +156,6 @@ done
 draw_bottom
 
 echo
-printf "  실행  : ${BOLD}aip <단계명>${RESET}   (예: aib, aipd, aitd)\n"
 printf "  단계변경: ${BOLD}echo <단계명> > config/current_step.txt${RESET}\n"
+printf "  단계명  : issue_fix / phase1_intraday / phase2_trading / phase3_position / phase4_webui\n"
 echo

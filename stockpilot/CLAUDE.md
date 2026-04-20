@@ -1,6 +1,7 @@
 # stockpilot — Claude 운영 지침
 
 > 이 파일은 Claude가 새 세션을 시작할 때 가장 먼저 읽는 핵심 지침이다.
+> **읽기 순서: CLAUDE.md → HANDOFF.md → WORKFLOW.md → 관련 docs/**
 > 현재 상태 및 다음 작업은 `HANDOFF.md` 참고.
 
 ---
@@ -15,7 +16,30 @@ KIS Open API 기반 주식 자동화 시스템. 평일 자동 브리핑 + 텔레
 
 ---
 
-## 2. 절대 규칙 (보안)
+## 2. 워크플로우 역할 규칙 (WORKFLOW.md 요약)
+
+```
+✅ 새 세션 시작 시 반드시 WORKFLOW.md 확인
+✅ 기능 개발(새 기능·리팩토링)은 WORKFLOW.md Stage 1~13 준수
+✅ Claude 역할: 기획(Stage 1~4) + 설계(Stage 5~7) + 검증(Stage 9, 11) + QA(Stage 12)
+❌ Claude는 구현(Stage 8, 10) 직접 금지 → 반드시 Codex에 위임
+```
+
+작업 전 판단 기준:
+- **핫픽스·수치조정·설정변경** → 직접 수정 가능 (실행 모드)
+- **새 기능·로직 추가·리팩토링** → WORKFLOW.md Stage 1~7 문서 작성 후 Codex 위임
+
+### 🔴 필수 협업 체크포인트 (혼자 진행 절대 금지)
+
+| 단계 | 규칙 |
+|------|------|
+| Stage 1 브레인스토밍 | 형진님과 대화하며 방향 잡기 — Claude 혼자 작성 금지 |
+| Stage 4 계획 통합 완료 후 | **형진님 승인 필수** → 승인 없이 Stage 5 진입 금지 |
+| Stage 5 기술 설계 | Stage 4 승인 확인 후에만 작성 |
+
+---
+
+## 3. 절대 규칙 (보안)
 
 ```
 ❌ API키·계좌번호·토큰을 코드/로그에 평문 노출 금지
@@ -33,7 +57,7 @@ inject_to_env()   # 반드시 첫 줄에 호출
 
 ---
 
-## 3. 스크립트 실행
+## 4. 스크립트 실행
 
 ```bash
 cd /Users/geenya/projects/AI_Projects/stockpilot
@@ -61,7 +85,7 @@ aigit_upload
 
 ---
 
-## 4. 핵심 파일
+## 5. 핵심 파일
 
 | 파일 | 역할 |
 |------|------|
@@ -76,7 +100,7 @@ aigit_upload
 
 ---
 
-## 5. 자동 실행 스케줄 (launchd, 평일)
+## 6. 자동 실행 스케줄 (launchd, 평일)
 
 | 시각 | 스크립트 |
 |------|----------|
@@ -91,7 +115,7 @@ aigit_upload
 
 ---
 
-## 6. 스킬 참조
+## 7. 스킬 참조
 
 상세 작업은 해당 SKILL.md를 먼저 읽고 진행한다.
 
@@ -103,7 +127,7 @@ aigit_upload
 
 ---
 
-## 7. 코드 검증 가이드
+## 8. 코드 검증 가이드
 
 - 문법 검사: `venv/bin/python3 -m py_compile morning_report/<파일>.py`
 - 복잡한 로직 변경 시: Opus 서브에이전트(high effort)로 검증
