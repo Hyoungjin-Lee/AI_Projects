@@ -149,6 +149,12 @@ def run(dry_run: bool = False):
             for h in holdings
         }
         state.update("holdings", holdings_signals, caller="morning_report")
+        # 오늘 평가손익 저장 → 내일 이체금액 역산에 사용
+        state.update("financials", {
+            "eval_pnl":   cash_info.get("eval_pnl", 0),
+            "net_asset":  cash_info.get("net_asset", 0),
+            "recorded_at": datetime.now().strftime("%H:%M"),
+        }, caller="morning_report")
         print("[state] 모닝 브리핑 상태 기록 완료", file=sys.stderr)
     except Exception as e:
         print(f"[state] 기록 실패 (무시): {e}", file=sys.stderr)
@@ -188,15 +194,16 @@ def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, ba
     sp500  = us.get("sp500")
     nasdaq = us.get("nasdaq")
     dow    = us.get("dow")
+    def _chg_str(chg) -> str:
+        """등락률 문자열 — None이면 빈 문자열."""
+        return f"  {chg}" if chg else ""
+
     if sp500:
-        sp_chg = us.get("sp500_chg", "")
-        lines.append(f"  S&P500  {sp500:,.0f}  {sp_chg}")
+        lines.append(f"  S&P500  {sp500:,.0f}{_chg_str(us.get('sp500_chg'))}")
     if nasdaq:
-        nq_chg = us.get("nasdaq_chg", "")
-        lines.append(f"  나스닥  {nasdaq:,.0f}  {nq_chg}")
+        lines.append(f"  나스닥  {nasdaq:,.0f}{_chg_str(us.get('nasdaq_chg'))}")
     if dow:
-        dj_chg = us.get("dow_chg", "")
-        lines.append(f"  다우    {dow:,.0f}  {dj_chg}")
+        lines.append(f"  다우    {dow:,.0f}{_chg_str(us.get('dow_chg'))}")
 
     usd = fx.get("usd_krw")
     usd_chg = fx.get("usd_krw_chg_pct", "")
@@ -317,9 +324,36 @@ def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, ba
         lines.append(f"  유가평가금액: {display_stock:>12,.0f}원")
         if prev_net_asset > 0:
             lines.append(f"  전일순자산:   {prev_net_asset:>12,.0f}원")
-            lines.append(f"  {asset_emoji} 자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)")
+            # 자산증감 — 입출금 왜곡 감지 및 역산
+            _chg_threshold = prev_net_asset * 0.05  # 5% 초과 시 입출금 의심
+            if abs(asset_chg) > _chg_threshold:
+                lines.append(
+                    f"  ⚠️  자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)"
+                )
+                # 전일 평가손익이 state에 있으면 정확한 역산, 없으면 안내
+                try:
+                    _state    = StateManager()
+                    _prev_pnl = _state.get("financials.eval_pnl")
+                    if _prev_pnl is not None and _prev_pnl != 0:
+                        # 오늘 손익 = 오늘 평가손익 - 전일 평가손익
+                        _pnl_change = eval_pnl - _prev_pnl
+                        _transfer   = asset_chg - _pnl_change
+                        _t_emoji    = "📤" if _transfer < 0 else "📥"
+                        lines.append(
+                            f"  {_t_emoji} 이체금액(예상): {_transfer:>+11,.0f}원  (전일 기록 기반)"
+                        )
+                    else:
+                        lines.append(
+                            f"  ℹ️  이체금액 역산 불가 — 내일부터 전일 기록 기반으로 자동 제공"
+                        )
+                except Exception:
+                    lines.append(
+                        f"  ℹ️  이체금액 역산 불가 — 내일부터 전일 기록 기반으로 자동 제공"
+                    )
+            else:
+                lines.append(f"  {asset_emoji} 자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)")
 
-        # 정산현황
+        # 정산현황 — 평가손익 기준 (입출금 무관, 항상 정확)
         lines.append(f"\n📊 정산현황")
         if today_buy > 0:
             lines.append(f"  금일매수:     {today_buy:>12,.0f}원")
@@ -327,7 +361,11 @@ def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, ba
             lines.append(f"  금일매도:     {today_sell:>12,.0f}원")
         if today_fee > 0:
             lines.append(f"  금일제비용:   {today_fee:>12,.0f}원")
-        lines.append(f"  {pnl_emoji} 평가손익합계: {display_pnl:>+12,.0f}원 ({invest_return:+.2f}%)")
+        # 평가손익은 eval_pnl (evlu_pfls_smtl_amt) 우선 사용 — 입출금 무관
+        pure_pnl     = eval_pnl if eval_pnl != 0 else total_profit
+        pure_pnl_pct = (pure_pnl / total_invest * 100) if total_invest > 0 else 0.0
+        pure_emoji   = "🔴" if pure_pnl < 0 else "🟢"
+        lines.append(f"  {pure_emoji} 평가손익합계: {pure_pnl:>+12,.0f}원 ({pure_pnl_pct:+.2f}%)")
 
         # 예수금
         lines.append(f"\n💵 예수금")
@@ -355,6 +393,27 @@ def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, ba
     lines.append("※ AI 분석 참고용. 투자 책임은 본인에게 있습니다.")
 
     return "\n".join(lines)
+
+
+def _load_strategy() -> dict:
+    """strategy_config.json 로드. 실패 시 기본값 반환."""
+    try:
+        import json as _json
+        path = _ROOT / "data" / "strategy_config.json"
+        with open(path, encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return {
+            "exit": {
+                "hard_stop":     {"pct": -3.0},
+                "trailing_stop": {"activation_pct": 2.0, "trail_pct": 3.0, "lookback_days": 5},
+                "take_profit":   {"pct": 5.0},
+                "stale_exit":    {"days": 5, "min_gain_pct": 2.0},
+            },
+            "entry": {
+                "rsi_range": {"min": 40, "max": 60},
+            }
+        }
 
 
 def _build_action_points(holdings, analysis, us_market, fx) -> list:
@@ -394,7 +453,7 @@ def _build_action_points(holdings, analysis, us_market, fx) -> list:
         if verdict == "SELL":
             points.append(f"  ⚠️  {name}: 매도 시그널 — 청산 검토 필요")
         elif verdict == "BUY" and pnl_pct < -3:
-            points.append(f"  📗 {name}: 매수 시그널이나 현재 손실 중 — 추가 분석 필요")
+            points.extend(_analyze_loss_position(name, code, h, result))
         elif stop_loss and cur and cur < stop_loss * 1.02:
             points.append(f"  🚨 {name}: 손절가({stop_loss:,.0f}) 근접 — 주의")
 
@@ -402,6 +461,128 @@ def _build_action_points(holdings, analysis, us_market, fx) -> list:
         points.append("  • 특별한 액션 포인트 없음. 보유 유지 관찰.")
 
     return points
+
+
+def _analyze_loss_position(name: str, code: str, holding: dict, result: dict) -> list:
+    """
+    BUY 시그널이나 손실 중인 종목에 대한 3단계 추가 분석.
+      ① 손실 원인 진단
+      ② 매도 조건 체크 (strategy_config 기준)
+      ③ 명확한 액션 권고
+    """
+    cfg    = _load_strategy()
+    exit_  = cfg.get("exit", {})
+    hard_stop_pct     = exit_.get("hard_stop", {}).get("pct", -3.0)
+    trail_activate    = exit_.get("trailing_stop", {}).get("activation_pct", 2.0)
+    trail_pct         = exit_.get("trailing_stop", {}).get("trail_pct", 3.0)
+    trail_days        = exit_.get("trailing_stop", {}).get("lookback_days", 5)
+    take_profit_pct   = exit_.get("take_profit", {}).get("pct", 5.0)
+    stale_days        = exit_.get("stale_exit", {}).get("days", 5)
+    stale_min_gain    = exit_.get("stale_exit", {}).get("min_gain_pct", 2.0)
+
+    lines   = []
+    cur     = holding.get("current_price", 0)
+    avg     = holding.get("avg_price", 0)
+    pnl_pct = holding.get("pnl_pct", 0.0)
+    signals = result.get("key_signals", [])
+
+    # 시그널에서 RSI·SMA20 추출
+    rsi_val = None
+    sma20   = None
+    for s in signals:
+        sname = s.get("name", "")
+        sval  = s.get("value", "")
+        if "RSI" in sname:
+            try:
+                rsi_val = float(str(sval).split()[0])
+            except Exception:
+                pass
+        if "SMA20" in sname or "SMA20/60" in sname:
+            try:
+                parts = str(sval).replace(",", "").split("/")
+                sma20 = float(parts[0])
+            except Exception:
+                pass
+
+    lines.append(f"  📗 {name}({code}): BUY이나 {pnl_pct:+.1f}% 손실 중")
+
+    # ── ① 손실 원인 진단 ──────────────────────────────────────────
+    diag = []
+    if rsi_val is not None:
+        if rsi_val >= 70:
+            diag.append(f"RSI {rsi_val:.0f} (과매수 — 고점 물림 가능성)")
+        elif rsi_val >= 50:
+            diag.append(f"RSI {rsi_val:.0f} (중립~상승 — 추세 유지)")
+        elif rsi_val >= 30:
+            diag.append(f"RSI {rsi_val:.0f} (약세 구간)")
+        else:
+            diag.append(f"RSI {rsi_val:.0f} (과매도)")
+
+    if sma20 and cur:
+        if cur > sma20:
+            diag.append(f"SMA20 위 +{(cur-sma20)/sma20*100:.1f}% (추세 유지)")
+        else:
+            diag.append(f"SMA20 하회 -{(sma20-cur)/sma20*100:.1f}% (추세 이탈)")
+
+    hard_stop_price  = avg * (1 + hard_stop_pct / 100) if avg else 0
+    take_profit_price = avg * (1 + take_profit_pct / 100) if avg else 0
+    trail_activate_price = avg * (1 + trail_activate / 100) if avg else 0
+
+    if hard_stop_price and cur:
+        margin = (cur - hard_stop_price) / cur * 100
+        diag.append(f"하드스탑({hard_stop_price:,.0f}) 까지 {margin:.1f}% 여유")
+
+    if diag:
+        lines.append("     ① " + " | ".join(diag))
+
+    # ── ② 매도 조건 체크 ──────────────────────────────────────────
+    cond_lines = []
+
+    # 하드 스탑
+    if cur and cur <= hard_stop_price:
+        cond_lines.append(f"     🚨 ② 하드스탑 발동 — 평단 {hard_stop_pct:.0f}% 이탈 → 즉시 손절")
+    else:
+        cond_lines.append(f"     ✅ ② 하드스탑 미발동 (발동가 {hard_stop_price:,.0f}원)")
+
+    # 트레일링 스탑 상태
+    if pnl_pct >= trail_activate:
+        cond_lines.append(
+            f"     ✅ ② 트레일링 활성화 중 — {trail_days}일 고가 -{trail_pct:.0f}% 이탈 시 청산"
+        )
+    else:
+        cond_lines.append(
+            f"     🟡 ② 트레일링 미활성 (평단 +{trail_activate:.0f}% = {trail_activate_price:,.0f}원 돌파 시 활성화)"
+        )
+
+    # 보류 청산 경고
+    cond_lines.append(
+        f"     🟡 ② 보류청산 기준 — {stale_days}일 내 고가가 {trail_activate_price:,.0f}원 미달 시 청산"
+    )
+
+    lines.extend(cond_lines)
+
+    # ── ③ 액션 권고 ──────────────────────────────────────────────
+    entry_rsi_min = cfg.get("entry", {}).get("rsi_range", {}).get("min", 40)
+    entry_rsi_max = cfg.get("entry", {}).get("rsi_range", {}).get("max", 60)
+
+    if cur and cur <= hard_stop_price:
+        action = f"즉시 손절 — 하드스탑({hard_stop_price:,.0f}) 이탈"
+        emoji  = "🚨"
+    elif sma20 and cur < sma20:
+        action = f"SMA20({sma20:,.0f}) 하회 — 추가매수 금지, 반등 확인 후 판단"
+        emoji  = "🔴"
+    elif rsi_val and rsi_val > entry_rsi_max:
+        action = f"RSI {rsi_val:.0f} 과열 — 추가매수 보류, 홀드 유지"
+        emoji  = "🟡"
+    elif rsi_val and rsi_val < entry_rsi_min and sma20 and cur > sma20:
+        action = f"RSI {rsi_val:.0f} 눌림목 + 추세 유지 — 분할 추가매수 검토"
+        emoji  = "🟢"
+    else:
+        action = f"추세 유지 중 — 홀드, 하드스탑({hard_stop_price:,.0f}) 모니터링"
+        emoji  = "🟡"
+
+    lines.append(f"     {emoji} ③ 권고: {action}")
+    return lines
 
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
@@ -612,7 +793,11 @@ def _synthesize_weekly_from_daily(code: str, weeks: int = 26):
 
     with open(daily_files[0], encoding="utf-8") as f:
         data = _json.load(f)
-    rows = data.get("output2") or data.get("output") or []
+    # 파일 포맷이 list 직접 저장 또는 {"output2": [...]} 두 가지 모두 지원
+    if isinstance(data, list):
+        rows = data
+    else:
+        rows = data.get("output2") or data.get("output") or []
     if not rows:
         raise ValueError(f"{code} 일봉 데이터 비어 있음")
 
@@ -664,7 +849,10 @@ def _analyze_weekly(code: str) -> dict:
 
     with open(files[0], encoding="utf-8") as f:
         data = _json.load(f)
-    rows = data.get("output2") or data.get("output") or []
+    if isinstance(data, list):
+        rows = data
+    else:
+        rows = data.get("output2") or data.get("output") or []
     if not rows:
         raise ValueError("주봉 데이터 비어 있음")
 

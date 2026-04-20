@@ -1,6 +1,6 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-19 (v2.1 장초기 실시간 종목 발굴 완료)
+> 최종 업데이트: 2026-04-21 (v2.4 — 스크리닝 완화 + closing_report 총자산 동기화)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -22,12 +22,12 @@
 |------|----------|------|
 | 08:20 | `watchlist_sync.py` | KIS HTS 관심종목 → watchlist.json + state 기록 |
 | 08:30 | `morning_report.py` | 모닝 브리핑 텔레그램 전송 + state 기록 |
-| 09:03 | `intraday_discovery.py --round 1` | 장초기 1차 수집 (거래량/체결강도/등락률 상위 30) ← NEW |
-| 09:05 | `intraday_discovery.py --round 2` | 2차 수집 → 교집합 → 점수 산정 → 텔레그램 전송 ← NEW |
+| 09:03 | `intraday_discovery.py --round 1` | 장초기 1차 수집 (거래량/체결강도/등락률 상위 30) |
+| 09:05 | `intraday_discovery.py --round 2` | 2차 수집 → 교집합 → 점수 산정 → 텔레그램 전송 |
 | 09:10 | `intraday_report.py` | 장초기 현황 텔레그램 전송 + state 기록 |
 | 20:30 | `closing_report.py` | 장마감 결산 텔레그램 전송 + state 기록 |
 | 23:30 | `stock_discovery.py` | 야간 종목 발굴 텔레그램 전송 + state 기록 (월~토) |
-| 상시 | `telegram_bot.py` | 텔레그램 명령 수신 (부팅 시 자동 시작) |
+| 상시  | `telegram_bot.py` | 텔레그램 명령 수신 (부팅 시 자동 시작) |
 
 ---
 
@@ -36,213 +36,263 @@
 ```
 stockpilot/
 ├── morning_report/
-│   ├── morning_report.py       # 모닝 브리핑 (state 기록 포함)
-│   ├── intraday_report.py      # 장초기 브리핑 (state 기록 포함)
-│   ├── closing_report.py       # 장마감 결산 (state 기록 포함)
-│   ├── stock_discovery.py      # 야간 종목 발굴 (state 기록 포함)
-│   ├── watchlist_sync.py       # 관심종목 동기화 (state 기록 포함)
-│   ├── telegram_sender.py      # 텔레그램 단방향 전송
+│   ├── morning_report.py       # 모닝 브리핑 (대응포인트 3단계 분석 포함)
+│   ├── intraday_report.py      # 장초기 브리핑
+│   ├── intraday_discovery.py   # 장초기 실시간 종목 발굴 (교집합 필터)
+│   ├── closing_report.py       # 장마감 결산
+│   ├── stock_discovery.py      # 야간 종목 발굴
+│   ├── watchlist_sync.py       # 관심종목 동기화
+│   ├── check_price.py          # 종목 현재가 즉시 조회 (발굴가 대비 증감 표시)
+│   ├── data_fetcher.py         # 글로벌 지수 (yfinance 기반 — S&P500, 나스닥)
 │   ├── telegram_bot.py         # 텔레그램 봇 데몬 (양방향 수신)
-│   ├── orchestrator.py         # 명령 라우팅 (/잔고 /상태 /발굴 /도움말)
-│   ├── state_manager.py        # 에이전트 간 공유 상태 관리
-│   ├── intraday_discovery.py   # 장초기 실시간 종목 발굴 (교집합 필터) ← NEW
-│   ├── keychain_manager.py     # macOS Keychain 인증정보 관리
-│   └── setup_telegram.py       # 텔레그램 최초 설정 도우미
-├── .skills/
-│   ├── kis-api/scripts/kis_client.py
-│   ├── stock-analysis/
-│   └── trading-report/
+│   ├── orchestrator.py         # 명령 라우팅
+│   ├── state_manager.py        # 에이전트 간 공유 상태
+│   └── keychain_manager.py     # macOS Keychain 인증정보 관리
 ├── data/
 │   ├── watchlist.json          # 관심종목
-│   ├── daily_state.json        # 에이전트 간 공유 상태 ← NEW
-│   └── cache/                  # KIS 토큰 캐시
+│   ├── daily_state.json        # 에이전트 간 공유 상태 (런타임)
+│   └── strategy_config.json    # 매매 전략 수치 중앙 관리 ← NEW
 ├── docs/
-│   ├── 07_intraday_discovery/  # 장초기 종목 발굴 설계 문서 ← NEW
-│   │   ├── technical_design.md # API 파라미터/흐름/스키마 상세
-│   │   └── implementation_prompt.md  # Codex 구현 지시서
-│   ├── 06_agent_architecture/  # v2.0 에이전트 설계 문서
-│   ├── 05_qa_release/          # QA 리포트
+│   ├── STRATEGY.md             # 매매 전략 문서 (추세추종 B+C 조합) ← NEW
 │   └── api/                    # KIS API xlsx 문서
-├── logs/
-│   ├── stockbot.log            # telegram_bot.py stdout ← NEW
-│   └── stockbot_error.log      # telegram_bot.py stderr ← NEW
-└── ~/Library/LaunchAgents/
-    ├── com.aigeenya.stockbot.plist              # 봇 데몬 (상시)
-    ├── com.aigeenya.stockreport.plist           # morning 08:30
-    ├── com.aigeenya.stockreport.intraday.plist  # intraday 09:10
-    ├── com.aigeenya.stockreport.closing.plist   # closing 20:30
-    ├── com.aigeenya.stockreport.discovery.plist # 야간 발굴 23:30
-    ├── com.aigeenya.stockreport.watchlist.plist # watchlist 08:20
-    ├── com.aigeenya.stockreport.discovery1.plist # 장초기 1차 09:03 ← NEW
-    └── com.aigeenya.stockreport.discovery2.plist # 장초기 2차 09:05 ← NEW
+└── logs/
 ```
 
 ---
 
-## 4. 보안 구조 (Keychain 통합)
+## 4. 보안 구조 (Keychain)
 
-### Keychain 저장 항목 (서비스명: `AI주식매매`)
-
-| 키 | 내용 |
-|----|------|
-| `KIS_APP_KEY` | KIS API 앱키 |
-| `KIS_APP_SECRET` | KIS API 앱시크릿 |
-| `KIS_ACCOUNT_NO` | 계좌번호 |
-| `KIS_HTS_ID` | MTS 로그인 ID |
-| `TELEGRAM_BOT_TOKEN` | 텔레그램 봇 토큰 |
-| `TELEGRAM_CHAT_ID` | 텔레그램 chat_id |
-
-### 모든 스크립트 공통 진입점
 ```python
 from keychain_manager import inject_to_env
-inject_to_env()  # Keychain → os.environ 자동 주입
+inject_to_env()  # 반드시 첫 줄에 호출
 ```
+
+절대 규칙:
+- API키/계좌번호/토큰 코드·로그 평문 노출 금지
+- `KIS_ALLOW_LIVE_ORDER=1` 없으면 실주문 절대 불가
 
 ---
 
-## 5. v2.1 구현 현황 (2026-04-19 완료)
+## 5. v2.2 변경사항 (2026-04-20)
 
-### 구현된 기능
+### ✅ 완료된 작업
 
-| 구성요소 | 파일 | 상태 |
+| 항목 | 내용 |
+|------|------|
+| intraday_discovery 디버깅 | API 필드명 버그 수정 (`_get_code()`, `cttr→tday_rltv`) |
+| 글로벌 지수 수정 | yfinance로 교체 (S&P500 None 수정 + 나스닥 추가) |
+| 모닝리포트 대응포인트 | "추가 분석 필요" → 3단계 실제 분석으로 고도화 |
+| 주봉 분석 버그 수정 | `isinstance(data, list)` 처리 |
+| 자산증감 왜곡 감지 | ±5% 초과 시 경고 + 이체금액 역산 로직 |
+| check_price.py 포맷 개선 | 발굴가 대비 현재가 증감 명확히 표시 |
+| **매매 전략 확정** | 추세추종 B+C 조합 → `data/strategy_config.json` 중앙 관리 |
+| **분할매매 로직 설계** | 5:3:2 분할, 평단 기준 하드스탑, 자동가격 계산 정의 |
+
+### 오늘 발굴 성과 (2026-04-20)
+
+- 이수페타시스: +7.2%(발굴) → +13.13%(장마감) **+5.9%p**
+- 에코프로머티리얼즈: +5.4%(발굴) → +7.06%(장마감)
+
+---
+
+## 6. 확정된 매매 전략 (strategy_config.json)
+
+### 진입 조건 (3개 모두 충족)
+
+| 조건 | 기준 |
+|------|------|
+| 주봉 추세 | 주봉 SMA5 > SMA10 |
+| SMA20 지지 | 현재가 > 일봉 SMA20 |
+| RSI 범위 | 일봉 RSI 40~60 |
+
+### 매도 조건 (우선순위 순)
+
+| 우선순위 | 조건 | 기준 |
 |---------|------|------|
-| 공유 상태 | `state_manager.py` + `data/daily_state.json` | ✅ 완료 |
-| 5개 스크립트 state 연동 | morning/intraday/closing/discovery/watchlist | ✅ 완료 |
-| 텔레그램 명령 수신 | `telegram_bot.py` | ✅ 완료 |
-| 명령 라우팅 | `orchestrator.py` | ✅ 완료 |
-| 봇 데몬 launchd | `com.aigeenya.stockbot.plist` | ✅ 완료 |
-| AGENTS.md 문서화 | `AGENTS.md` | ✅ 완료 |
-| WORKFLOW.md 독립검증 프로토콜 | 섹션 10 | ✅ 완료 |
-| **장초기 실시간 종목 발굴** | `intraday_discovery.py` | ✅ 완료 ← NEW |
-| launchd 2개 등록 | discovery1(09:03) + discovery2(09:05) | ✅ 완료 ← NEW |
-| 기술 설계 문서 | `docs/07_intraday_discovery/` | ✅ 완료 ← NEW |
+| ① | 하드 스탑 | 평단 -3% 무조건 손절 |
+| ② | 트레일링 스탑 | 평단 +2% 활성화 → 5일 고가 -3% 이탈 청산 |
+| ③ | 목표가 익절 | 평단 +5% 도달 |
+| ④ | 보류 청산 | 5일 경과 + 최고가 평단 +2% 미달 |
 
-### 사용 가능한 텔레그램 명령어
+---
+
+## 7. 분할매매 설계 (Phase 2 구현 대상)
+
+### 분할 진입 구조
 
 ```
-/잔고    — KIS 잔고 즉시 조회
-/상태    — 오늘 시장/시그널 요약
-/발굴    — 야간 종목 발굴 즉시 실행
-/도움말  — 명령어 목록
+1차 매수: 목표 수량 50%  (진입 조건 3개 모두 충족 시)
+2차 매수: 목표 수량 30%  (평단 -1~-2% 눌림 + SMA20 위 + 1일 경과)
+3차 매수: 목목 수량 20%  (강한 지지 확인 시만)
 ```
 
-### daily_state.json 구조
+**핵심 원칙: 하드스탑 기준 = 항상 현재 평단 (분할 후 재계산)**
+
+### 자동 가격 계산
+
+```
+진입가 (돌파) = 5일 고가 × 1.005
+진입가 (눌림) = SMA20 × 1.005
+하드스탑      = 평단 × 0.97
+목표가        = 평단 × 1.05
+트레일링 활성 = 평단 × 1.02 돌파 시
+```
+
+### strategy_config.json 확장 예정 구조
 
 ```json
-{
-  "date": "2026-04-21",
-  "market": { "us_sentiment": "...", "usd_krw": 0, "fear_greed": "..." },
-  "holdings": { "종목코드": { "signal": "BUY/SELL/HOLD", "pnl_pct": 0.0 } },
-  "alerts": { "intraday": "...", "vol_spike": [] },
-  "discovery": { "candidates": [], "top_pick": "..." },
-  "watchlist_changed": false,
-  "intraday_discovery": {
-    "round1_at": "09:03",
-    "round2_at": "09:05",
-    "candidates_r1": ["종목코드", ...],
-    "final_picks": [{"code": "...", "name": "...", "score": 0, "reason": "..."}]
+"position": {
+  "split_entry": {
+    "max_splits": 3,
+    "weights": [0.5, 0.3, 0.2],
+    "add_condition": {
+      "dip_from_avg_pct_min": -2.0,
+      "dip_from_avg_pct_max": -1.0,
+      "require_sma20_above": true,
+      "min_days_after_entry": 1
+    }
+  },
+  "entry_price": {
+    "breakout": { "method": "5d_high", "buffer_pct": 0.5 },
+    "dip":      { "method": "sma20",   "buffer_pct": 0.5 }
   }
 }
 ```
 
----
+### 분할 매도 (전량 청산)
 
-## 6. 등록 완료된 launchd 에이전트
-
-모든 plist가 `~/Library/LaunchAgents/`에 등록되어 있습니다.
-
-```bash
-# 전체 등록 상태 확인
-launchctl list | grep aigeenya
-```
-
-예상 출력:
-```
-PID   Status  Label
-XXXXX  0  com.aigeenya.stockbot               ← 상시 실행
--      0  com.aigeenya.stockreport            ← 08:30
--      0  com.aigeenya.stockreport.watchlist  ← 08:20
--      0  com.aigeenya.stockreport.discovery1 ← 09:03 ← NEW
--      0  com.aigeenya.stockreport.discovery2 ← 09:05 ← NEW
--      0  com.aigeenya.stockreport.intraday   ← 09:10
--      0  com.aigeenya.stockreport.closing    ← 20:30
--      0  com.aigeenya.stockreport.discovery  ← 23:30
-```
-
-### 부팅 후 봇 재시작 확인
-
-```bash
-launchctl list | grep stockbot
-tail -20 /Users/geenya/projects/AI_Projects/stockpilot/logs/stockbot_error.log
-```
+텔레그램 `/매도` 명령은 **전량 청산** 방식으로 확정.
+(시장가 전량 매도 — 분할 매도 없음)
 
 ---
 
-## 7. 다음 세션에서 할 작업
+## 8. v2.3 변경사항 (2026-04-21)
 
-> **현재 상태: v2.1 장초기 실시간 종목 발굴 완료 ✅**
-> **월요일(2026-04-21) 장 시작 후 09:03/09:05 실제 API 동작 검증 예정**
+### ✅ 완료된 작업
 
-### 🔴 우선 확인 (2026-04-21 오전)
-- [ ] 09:03 `intraday_discovery.py --round 1` 실행 확인
-  - `tail -f logs/intraday_discovery.log`
-- [ ] 09:05 `intraday_discovery.py --round 2` + 텔레그램 전송 확인
-- [ ] `FID_INPUT_ISCD=2001` 거래량순위 API 지원 여부 확인
-  - 에러 시 fallback(`FID_INPUT_ISCD=0000`) 자동 전환 확인
-- [ ] HTS조회상위 TR_ID 실제 테스트 (실패 시 건너뜀 동작 확인)
+| 항목 | 내용 |
+|------|------|
+| **체결강도 실시간 조회** | `kis_client.get_ccnl()` 추가 (FHKST01010300) → check_price.py에서 발굴 시 vs 현재 체결강도 비교 표시 |
+| **`/발굴` 라우팅 수정** | 장중(09:00~15:30) → intraday_discovery round1+2 실행 / 장외 → stock_discovery (관심종목 스크리닝) |
+| **`/잔고` 보유종목 상세** | 현재가·수량·평단·손익금액·수익률 모두 표시 |
+| **`/상태` 시그널 개선** | 종목명·한글 시그널·현재가(실시간)·평단·손절/목표가 표시 |
+| **`/상태` 매수/매도 타점 코멘트** | 현재가와 SMA20·5일고가·평단 비교 → 상황별 코멘트 자동 생성 |
 
-### 운영 모니터링 (지속)
-- [ ] `morning_report.py` 08:30 자동 실행 확인
-- [ ] `/잔고`, `/상태` 명령 텔레그램에서 테스트
-- [ ] `closing_report.py` 20:30 자동 실행 + state 기록 확인
+#### 타점 코멘트 상황별 분기
 
-### 다음 프로젝트 후보
-- [ ] intraday_discovery 조건 고도화 (이격도 실시간 필터 강화)
-- [ ] stock_discovery 스크리닝 조건 고도화 (기술적 지표 추가)
-- [ ] 보유 종목 자동 매도 시그널 (Phase 2 — 실주문 포함)
-- [ ] 텔레그램 `/매수`, `/매도` 명령 구현 (Phase 2)
+| 매수 상황 | 출력 |
+|-----------|------|
+| 현재가 < SMA20 | 🚫 추가매수 금지 + 손절가 안내 |
+| SMA20 ~ SMA20×1.02 | ✅ 눌림지지 확인됨 X원~Y원 매수 |
+| SMA20×1.02 ~ 5일고가 | ⏳ 돌파 대기, 🚫 추격 금지 |
+| 5일고가 돌파 +1% 이내 | ✅ 돌파추세 확인됨 X원~Y원 매수 |
+| 5일고가 돌파 +1% 초과 | 🚫 과열 구간, 눌림 재진입 대기 |
+
+| 매도 상황 | 출력 |
+|-----------|------|
+| 손절가 이탈 | 🚨 즉시 전량 손절 |
+| 손실 구간(손절가~평단) | ⚠️ 추가매수 금지 + 분할 정리 구간 |
+| 수익 구간(평단~목표가) | 📊 트레일링 대기 + 분할 익절 구간 |
+| 목표가 도달 | 🎯 X원~Y원 대 1/3씩 단계 익절 |
+
+#### 핵심 구조 변경
+
+- `closing_report.py`: holdings_signals 저장 시 `name`, `cur_price`, `avg_price`, `entry_low`, `entry_high`, `exit_low`, `exit_high` 추가
+  - `entry_low` = `SMA20 × 1.005` (캐시 일봉에서 직접 계산)
+  - `entry_high` = `5일고가 × 1.005` (캐시 일봉에서 직접 계산)
+  - `exit_low` = `평단 × 0.97` (하드스탑)
+  - `exit_high` = `평단 × 1.05` (목표가)
+- `orchestrator.py`: `_build_action_comment()` 함수 추가 (상황 판단 로직 분리)
 
 ---
 
-## 8. 주요 명령어 모음
+## 8-1. 완료된 이슈 (v2.4, 2026-04-21)
+
+### ✅ 이슈 2 — stock_discovery 스크리닝 조건 완화 (완료)
+
+- `_MIN_VOL_RATIO` 0.8 → 0.5 완화 (야간 실행 특성 반영)
+- `_screen_stock()` HOLD confidence 기준 0.5 → 0.4 완화
+
+### ✅ 이슈 3 — closing_report 총자산 로직 동기화 (완료)
+
+- `display_net` 기준을 `tot_evlu_amt`(총평가금액)로 변경 (기존: `nass_amt` 순자산)
+- 자산증감 ±5% 초과 시 `⚠️` 경고 로직 추가
+- `financials.eval_pnl` state 기반 이체금액 역산 로직 이식
+
+---
+
+## 9. Phase별 로드맵
+
+| Phase | 내용 | 상태 |
+|-------|------|------|
+| **Phase 1** | intraday_discovery 고도화 (발굴 조건 정밀화) | 🔜 다음 세션 |
+| **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 Phase 1 후 |
+| **Phase 3** | 보유 포지션 평단 관리 자동화 (물타기/익절/손절 계산) | 🔜 Phase 2 후 |
+| **Phase 4** | 웹 UI (전략 설정 화면) | 🔜 마지막 |
+
+---
+
+## 9. 다음 세션에서 할 작업
+
+### ✅ 이슈 2: stock_discovery 스크리닝 완화 (완료)
+
+- [x] `_MIN_VOL_RATIO` 0.8 → 0.5 완화
+- [x] HOLD confidence 기준 0.5 → 0.4 완화
+
+### ✅ 이슈 3: closing_report 총자산 동기화 (완료)
+
+- [x] `display_net` 기준을 `tot_evlu_amt`(총평가금액)로 변경
+- [x] 자산증감 ±5% 경고 로직 추가
+- [x] 이체금액 역산 로직 (`financials.eval_pnl` 활용) 이식
+
+### 🔴 Phase 1 — intraday_discovery 고도화
+
+- [ ] 체결강도 기준 상향 검토 (현재: 120 → 140~150?)
+- [ ] 등락률 최소값 필터 추가 (예: 3% 미만 제외)
+- [ ] 가중평균 > 현재가 필터 (오전 약세 제외)
+- [ ] 발굴 성과 추적 DB (종목별 발굴가 vs 장마감가 자동 기록)
+
+### 🟡 Phase 2 준비 — 텔레그램 매수/매도 명령
+
+- [ ] strategy_config.json에 `position.split_entry` 구조 추가
+- [ ] 별도 계좌 분리 설계 (Keychain에 `KIS_TRADING_ACCOUNT_NO` 추가)
+- [ ] `/매수 종목코드 수량` 명령 구현
+- [ ] `/매도 종목코드` 전량 청산 명령 구현
+
+---
+
+## 10. 주요 명령어 모음
 
 ```bash
 cd /Users/geenya/projects/AI_Projects/stockpilot
 
-# 테스트 (전송 없이)
+# 테스트
 venv/bin/python3 morning_report/morning_report.py --dry-run
 venv/bin/python3 morning_report/closing_report.py --dry-run
-venv/bin/python3 morning_report/intraday_report.py --dry-run
-
-# 장초기 발굴 수동 테스트 (dry-run)
 venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 2 --debug
 
-# 봇 1회 테스트 (텔레그램 명령 수신 확인)
-venv/bin/python3 morning_report/telegram_bot.py --once
+# 현재가 즉시 조회
+venv/bin/python3 morning_report/check_price.py
 
-# 공유 상태 확인
+# 상태 확인
 venv/bin/python3 morning_report/state_manager.py
-
-# Keychain 확인
 venv/bin/python3 morning_report/keychain_manager.py
-
-# 봇 데몬 상태 확인
 launchctl list | grep aigeenya
 
 # 로그 확인
-tail -50 logs/stockbot_error.log
 tail -50 logs/intraday_discovery.log
-tail -50 logs/intraday_discovery_error.log
 tail -50 logs/closing_report.log
+tail -50 logs/stockbot_error.log
 
-# GitHub 업로드 (보안 검사 포함)
-aigit_upload  # ~/.zshrc alias
+# GitHub 업로드
+aigit_upload
 ```
 
 ---
 
-## 9. 전체 작업 히스토리 (누적)
+## 11. 전체 작업 히스토리 (누적)
 
 1. 장마감 시간 변경: 16:00 → 20:30
 2. watchlist 자동 동기화: KIS HTS 관심종목 API 연동
@@ -251,36 +301,69 @@ aigit_upload  # ~/.zshrc alias
 5. 스케줄러 5개 launchd 등록 완료
 6. 운영자/사용자 매뉴얼 작성
 7. Opus 보안 검증 완료
-8. AGENTS.md (구 CLAUDE.md) 생성
+8. AGENTS.md 생성
 9. **카카오톡 → 텔레그램 전환 완료** (v1.0.0 — 2026-04-18)
-10. **closing_report 총자산/정산현황/예수금 섹션 분리**
-11. **morning_report / intraday_report 예수금 섹션 통일**
-12. **프로젝트 경로 재구조화**: `project/stockpilot` → `projects/AI_Projects/stockpilot`
-13. **GitHub 저장소 연결**: `Hyoungjin-Lee/AI_Projects` 최초 push
-14. **v2.0 에이전트 아키텍처 완료** (2026-04-19):
-    - `state_manager.py` — 에이전트 간 공유 상태
-    - 5개 스크립트 state 연동
-    - `telegram_bot.py` — 텔레그램 명령 수신 데몬
-    - `orchestrator.py` — 명령 라우팅 (`/잔고` `/상태` `/발굴`)
-    - `com.aigeenya.stockbot.plist` — 부팅 시 자동 시작
-    - AGENTS.md 전면 재작성 (v2.0 반영)
-    - WORKFLOW.md 독립 검증 프로토콜 추가 (섹션 10)
-15. **Telegram 봇 안정화** (2026-04-19):
-    - TELEGRAM_BOT_TOKEN Keychain 로드 누락 → `_TELEGRAM_KEYS` 별도 처리
-    - 시작 시 기존 메시지 24개 중복 수신 → startup offset 초기화
-    - `=` 구분선 두 줄 렌더링 → `―――――――――――――――` 변경
-16. **scripts/git_upload.sh + aigit_upload alias** (2026-04-19):
-    - 보안 검사 (.env, 토큰 파일)
-    - 커밋 메시지 자동 생성
-    - y/N 승인 후 push
-17. **v2.1 장초기 실시간 종목 발굴** (2026-04-19):
-    - `intraday_discovery.py` — KIS 거래량/체결강도/등락률 교집합 필터
-    - `--round 1`: 09:03 1차 수집, `--round 2`: 09:05 교집합+텔레그램
-    - ETF/ETN 제외, 이격도 120 이상 과열 필터
-    - launchd plist 2개 (discovery1, discovery2) 등록
-    - 기술 설계서 + Codex 구현 지시서 작성
-    - `docs/07_intraday_discovery/` 문서화
+10. closing_report 총자산/정산현황/예수금 섹션 분리
+11. morning_report / intraday_report 예수금 섹션 통일
+12. 프로젝트 경로 재구조화
+13. GitHub 저장소 연결: `Hyoungjin-Lee/AI_Projects`
+14. **v2.0 에이전트 아키텍처 완료** (2026-04-19)
+15. Telegram 봇 안정화 (startup offset, 구분선 렌더링)
+16. scripts/git_upload.sh + aigit_upload alias
+17. **v2.1 장초기 실시간 종목 발굴** (2026-04-19)
+19. **v2.3 텔레그램 명령 개선 + 타점 코멘트** (2026-04-21):
+    - check_price.py 체결강도 실시간 조회 (FHKST01010300 `get_ccnl()`)
+    - `/발굴` 장중/장외 자동 분기 (intraday_discovery ↔ stock_discovery)
+    - `/잔고` 보유종목 수량·평단·손익 상세 표시
+    - `/상태` 종목명·한글 시그널·현재가(실시간)·매수/매도 타점 코멘트
+    - `_build_action_comment()` 상황별 5단계 매수 / 4단계 매도 분기
+18. **v2.2 전략 확정 + 분할매매 설계** (2026-04-20):
+    - intraday_discovery API 필드명 버그 수정 (종목 0개 → 정상 발굴)
+    - 글로벌 지수 yfinance 교체 (S&P500 None 수정, 나스닥 추가)
+    - 모닝리포트 대응포인트 3단계 분석 고도화
+    - 자산증감 이체금액 역산 로직
+    - check_price.py 발굴가 대비 증감 표시
+    - 추세추종 B+C 매매 전략 확정 → strategy_config.json
+    - 분할매매 로직 설계 (5:3:2, 평단 기준 하드스탑, 전량 매도 확정)
 
 ---
 
-*자동 생성 | stockpilot v2.1 — AI 주식 자동화 시스템*
+*자동 생성 | stockpilot v2.3 — AI 주식 자동화 시스템*
+
+---
+
+## 📋 다음 세션 시작 프롬프트
+
+> 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
+> 마지막 갱신: 2026-04-21 (v2.4)
+
+```
+stockpilot 프로젝트 이어서 진행해줘.
+HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
+경로: /Users/geenya/projects/AI_Projects/stockpilot/
+
+현재 상태 요약:
+- v2.4 완료 (2026-04-21)
+- [이슈 2 완료] stock_discovery.py 스크리닝 완화
+  - _MIN_VOL_RATIO 0.8 → 0.5, HOLD confidence 0.5 → 0.4
+- [이슈 3 완료] closing_report.py 총자산 로직 동기화
+  - display_net 기준 tot_evlu_amt(총평가금액)로 변경 (기존: nass_amt 순자산)
+  - 자산증감 ±5% 경고 + 이체금액 역산 로직 이식 (morning_report와 동일)
+
+다음 할 작업:
+1. [Phase 1] intraday_discovery 발굴 조건 고도화
+   - 체결강도 기준 상향 검토 (현재: 120 → 140~150?)
+   - 등락률 최소값 필터 추가 (예: 3% 미만 제외)
+   - 가중평균 > 현재가 필터 (오전 약세 제외)
+   - 발굴 성과 추적 DB (종목별 발굴가 vs 장마감가 자동 기록)
+2. [Phase 2 준비] 텔레그램 /매수 /매도 명령 구현
+   - strategy_config.json에 position.split_entry 구조 추가
+   - 별도 계좌 분리 설계
+
+참고 사항:
+- 타점 계산 기준: entry_low=SMA20×1.005, entry_high=5일고가×1.005,
+  exit_low=평단×0.97, exit_high=평단×1.05 (strategy_config.json 기준)
+- 수정 후 반드시 `venv/bin/python3 -m py_compile` 문법 검사
+
+어디서부터 시작할까?
+```

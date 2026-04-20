@@ -1,0 +1,68 @@
+{
+  "_comment": "매매 전략 설정 파일 — 수치 조정 시 이 파일만 수정하면 전체 반영",
+  "_version": "1.0",
+  "_updated": "2026-04-20",
+
+  "entry": {
+    "_comment": "매수 진입 조건 (B+C 조합 — 추세추종)",
+    "weekly_trend": {
+      "enabled": true,
+      "condition": "weekly_sma5 > weekly_sma10",
+      "description": "주봉 SMA5 > SMA10 — 중기 상승 추세 확인"
+    },
+    "sma20_support": {
+      "enabled": true,
+      "condition": "current_price > daily_sma20",
+      "description": "현재가 > 일봉 SMA20 — 단기 추세 유지"
+    },
+    "rsi_range": {
+      "enabled": true,
+      "min": 40,
+      "max": 60,
+      "description": "일봉 RSI 40~60 — 눌림목 진입 타이밍"
+    }
+  },
+
+  "exit": {
+    "hard_stop": {
+      "_comment": "① 최우선 손절 — 평단 기준 고정",
+      "enabled": true,
+      "pct": -3.0,
+      "description": "평단 대비 -3% 이탈 시 무조건 손절"
+    },
+    "trailing_stop": {
+      "_comment": "② 트레일링 스탑 — 수익 구간 진입 후 활성화",
+      "enabled": true,
+      "activation_pct": 2.0,
+      "trail_pct": 3.0,
+      "lookback_days": 5,
+      "description": "평단 +2% 돌파 시 활성화 → 5일 고가 기준 -3% 이탈 시 청산"
+    },
+    "take_profit": {
+      "_comment": "③ 목표가 익절",
+      "enabled": true,
+      "pct": 5.0,
+      "description": "평단 대비 +5% 도달 시 익절"
+    },
+    "stale_exit": {
+      "_comment": "④ 보류 청산 — 기회비용 방지",
+      "enabled": true,
+      "days": 5,
+      "min_gain_pct": 2.0,
+      "description": "5일 경과 후 최고가가 평단 +2% 미달이면 보류 청산"
+    }
+  },
+
+  "risk_reward": {
+    "max_loss_pct": -3.0,
+    "base_target_pct": 5.0,
+    "min_rr_ratio": 1.67,
+    "note": "기본 R:R = 1:1.67 이상, 트레일링 시 무제한"
+  },
+
+  "notes": [
+    "수치(%)는 며칠 테스트 후 조정 예정",
+    "진입 조건 3개 모두 충족 시에만 매수",
+    "매도 조건은 우선순위 순서대로 체크 (① → ④)"
+  ]
+}

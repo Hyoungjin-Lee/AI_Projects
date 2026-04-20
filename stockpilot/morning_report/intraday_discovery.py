@@ -38,7 +38,7 @@ _HTS_PATH = "/uapi/domestic-stock/v1/quotations/capture-uplmt"
 _MEDALS = ["🥇", "🥈", "🥉"]
 
 
-def run(round_no: int, dry_run: bool = False) -> int:
+def run(round_no: int, dry_run: bool = False, debug: bool = False) -> int:
     now = datetime.now()
     now_str = now.strftime("%H:%M")
     print(f"[{now_str}] 장초기 종목 발굴 시작 (round {round_no})...", file=sys.stderr)
@@ -58,7 +58,7 @@ def run(round_no: int, dry_run: bool = False) -> int:
 
     if round_no == 1:
         return _run_round1(client, state)
-    return _run_round2(client, state, dry_run=dry_run)
+    return _run_round2(client, state, dry_run=dry_run, debug=debug)
 
 
 def _run_round1(client, state: StateManager) -> int:
@@ -69,7 +69,7 @@ def _run_round1(client, state: StateManager) -> int:
     round1 = {
         "time": datetime.now().strftime("%H:%M"),
         "vol": _extract_codes(volume_rows),
-        "pow": _extract_metric_map(power_rows, "cttr"),
+        "pow": _extract_metric_map(power_rows, "tday_rltv"),
         "flc": _extract_metric_map(fluct_rows, "prdy_ctrt"),
         "acml_vol": _extract_metric_map(volume_rows, "acml_vol"),
         "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
@@ -84,7 +84,7 @@ def _run_round1(client, state: StateManager) -> int:
     return 0
 
 
-def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
+def _run_round2(client, state: StateManager, dry_run: bool = False, debug: bool = False) -> int:
     round1 = state.get("intraday_discovery.round1")
     if not isinstance(round1, dict):
         print("[오류] round1 데이터가 없습니다. 먼저 --round 1 을 실행하세요.", file=sys.stderr)
@@ -99,9 +99,27 @@ def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
     vol_1 = set(round1.get("vol", []))
     vol_2 = set(_extract_codes(volume_rows))
     pow_1 = set((round1.get("pow") or {}).keys())
-    pow_2 = set(_extract_metric_map(power_rows, "cttr").keys())
+    pow_2 = set(_extract_metric_map(power_rows, "tday_rltv").keys())
     flc_1 = set((round1.get("flc") or {}).keys())
     flc_2 = set(_extract_metric_map(fluct_rows, "prdy_ctrt").keys())
+
+    if debug:
+        print("\n" + "=" * 55, file=sys.stderr)
+        print("🔬 [DEBUG] 단계별 필터 진단", file=sys.stderr)
+        print("=" * 55, file=sys.stderr)
+        print(f"  [R1] 거래량 상위:   {len(vol_1)}종목  {sorted(vol_1)[:5]}...", file=sys.stderr)
+        print(f"  [R2] 거래량 상위:   {len(vol_2)}종목", file=sys.stderr)
+        print(f"  [R1] 체결강도 상위: {len(pow_1)}종목", file=sys.stderr)
+        print(f"  [R2] 체결강도 상위: {len(pow_2)}종목", file=sys.stderr)
+        print(f"  [R1] 등락률 상위:   {len(flc_1)}종목", file=sys.stderr)
+        print(f"  [R2] 등락률 상위:   {len(flc_2)}종목", file=sys.stderr)
+        # 단계별 교집합
+        step1 = vol_1 & vol_2
+        step2 = step1 & pow_1 & pow_2
+        step3 = step2 & flc_1 & flc_2
+        print(f"\n  ① 거래량 R1∩R2:              {len(step1)}종목  {sorted(step1)}", file=sys.stderr)
+        print(f"  ② ①∩체결강도R1∩R2:          {len(step2)}종목  {sorted(step2)}", file=sys.stderr)
+        print(f"  ③ ②∩등락률R1∩R2 (교집합):   {len(step3)}종목  {sorted(step3)}", file=sys.stderr)
 
     candidates = vol_1 & vol_2 & pow_1 & pow_2 & flc_1 & flc_2
 
@@ -109,7 +127,14 @@ def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
         code for code, value in _extract_metric_map(disparity_rows, "d20_dsrt").items()
         if value >= 120
     }
+
+    if debug:
+        print(f"\n  ④ 과열 제외 (이격도≥120):    {len(candidates & overheated)}종목 제외  {sorted(candidates & overheated)}", file=sys.stderr)
+
     filtered = sorted(code for code in candidates if code not in overheated)
+
+    if debug:
+        print(f"  ⑤ 최종 후보 (필터 후):       {len(filtered)}종목  {filtered}", file=sys.stderr)
 
     hts_top = _extract_codes(hts_rows)[:_HTS_TOP_N]
     hts_ranks = {code: idx + 1 for idx, code in enumerate(hts_top)}
@@ -120,7 +145,7 @@ def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
 
     metrics = {
         "pow_1": round1.get("pow", {}) or {},
-        "pow_2": _extract_metric_map(power_rows, "cttr"),
+        "pow_2": _extract_metric_map(power_rows, "tday_rltv"),
         "flc_1": round1.get("flc", {}) or {},
         "flc_2": _extract_metric_map(fluct_rows, "prdy_ctrt"),
         "vol_1": round1.get("acml_vol", {}) or {},
@@ -129,10 +154,26 @@ def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
     }
 
     scored = []
+    skipped_score = []
     for code in filtered:
         item = _score_candidate(code, names, metrics, hts_ranks)
         if item is not None:
             scored.append(item)
+        else:
+            skipped_score.append(code)
+
+    if debug:
+        print(f"\n  ⑥ 점수 산정 탈락 (체결강도 미상승): {len(skipped_score)}종목  {skipped_score}", file=sys.stderr)
+        print(f"  ⑦ 최종 점수 통과:                 {len(scored)}종목", file=sys.stderr)
+        for item in sorted(scored, key=lambda x: -x["score"]):
+            print(
+                f"     {item['name']}({item['code']})  "
+                f"점수:{item['score']}  "
+                f"체결강도:{item['pow_2']:.0f}(R1:{item['pow_1']:.0f})  "
+                f"등락률:{item['flc_2']:+.1f}%(R1:{item['flc_1']:+.1f}%)",
+                file=sys.stderr,
+            )
+        print("=" * 55 + "\n", file=sys.stderr)
 
     scored.sort(key=lambda item: (-item["score"], -item["pow_2"], -item["flc_2"], item["code"]))
     top_picks = scored[:3]
@@ -143,15 +184,16 @@ def _run_round2(client, state: StateManager, dry_run: bool = False) -> int:
         "overheated_count": len(candidates & overheated),
         "candidates": [
             {
-                "code": item["code"],
-                "name": item["name"],
-                "score": item["score"],
-                "pow_2": item["pow_2"],
+                "code":      item["code"],
+                "name":      item["name"],
+                "score":     item["score"],
+                "pow_2":     item["pow_2"],
                 "pow_delta": item["pow_delta"],
-                "flc_2": item["flc_2"],
+                "flc_2":     item["flc_2"],
                 "flc_delta": item["flc_delta"],
                 "vol_delta": item["vol_delta"],
-                "hts_rank": item["hts_rank"],
+                "hts_rank":  item["hts_rank"],
+                "disc_price": _extract_metric_map(volume_rows, "stck_prpr").get(item["code"], 0),
             }
             for item in scored
         ],
@@ -359,10 +401,22 @@ def _normalize_output(response: dict[str, Any]) -> list[dict[str, Any]]:
     return output if isinstance(output, list) else []
 
 
+_CODE_FIELDS = ("mksc_shrn_iscd", "stck_shrn_iscd")
+
+
+def _get_code(row: dict[str, Any]) -> str:
+    """거래량/체결강도/등락률 API 모두 대응 — 종목코드 필드명이 다름."""
+    for field in _CODE_FIELDS:
+        val = str(row.get(field, "")).strip()
+        if val:
+            return val
+    return ""
+
+
 def _extract_codes(rows: list[dict[str, Any]]) -> list[str]:
     codes = []
     for row in rows:
-        code = str(row.get("mksc_shrn_iscd", "")).strip()
+        code = _get_code(row)
         if code:
             codes.append(code)
     return codes
@@ -371,7 +425,7 @@ def _extract_codes(rows: list[dict[str, Any]]) -> list[str]:
 def _extract_metric_map(rows: list[dict[str, Any]], field: str) -> dict[str, float]:
     metrics = {}
     for row in rows:
-        code = str(row.get("mksc_shrn_iscd", "")).strip()
+        code = _get_code(row)
         if not code:
             continue
         value = _safe_float(row.get(field))
@@ -385,7 +439,7 @@ def _extract_name_map(*groups: list[dict[str, Any]]) -> dict[str, str]:
     names = {}
     for rows in groups:
         for row in rows:
-            code = str(row.get("mksc_shrn_iscd", "")).strip()
+            code = _get_code(row)
             name = str(row.get("hts_kor_isnm", "")).strip()
             if code and name:
                 names[code] = name
@@ -520,8 +574,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="장초기 실시간 종목 발굴")
     parser.add_argument("--round", dest="round_no", type=int, choices=[1, 2], required=True)
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 전송 없이 출력만 수행")
+    parser.add_argument("--debug", action="store_true", help="단계별 필터 진단 출력 (round 2 전용)")
     args = parser.parse_args()
-    return run(round_no=args.round_no, dry_run=args.dry_run)
+    return run(round_no=args.round_no, dry_run=args.dry_run, debug=args.debug)
 
 
 if __name__ == "__main__":

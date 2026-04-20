@@ -39,7 +39,7 @@ from state_manager import StateManager
 
 _WATCHLIST_FILE  = _ROOT / "data" / "watchlist.json"
 _MIN_MKTCAP_100M = 1000   # 시총 1000억 이상 (단위: 억원)
-_MIN_VOL_RATIO   = 0.8    # 거래량이 평균 대비 80% 이상 (너무 거래 없는 종목 제외)
+_MIN_VOL_RATIO   = 0.5    # 거래량이 평균 대비 50% 이상 (야간 실행 특성 반영, 0.8→0.5 완화)
 _MAX_PER_SECTOR  = 2      # 섹터당 최대 추천 종목 수
 
 _WEEKDAYS = {0, 1, 2, 3, 4}
@@ -263,7 +263,7 @@ def _screen_stock(client, code: str, name: str, sector: str, us_sentiment: str) 
     # 매수 시그널 필터
     if verdict not in ("BUY", "HOLD"):
         return None
-    if verdict == "HOLD" and confidence < 0.5:
+    if verdict == "HOLD" and confidence < 0.4:  # 0.5 → 0.4 완화
         return None
 
     # 거래량 체크 (캐시 파일에서 읽기)

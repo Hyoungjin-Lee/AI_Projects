@@ -106,7 +106,11 @@ def run(dry_run: bool = False):
         try:
             _fetch_daily_if_needed(client, code)
             import analyze_swing as _swing
-            analysis_results[code] = _swing.analyze(code, days=60)
+            result = _swing.analyze(code, days=60)
+            # 타점 계산을 위해 원시 지표값 보완
+            result["_sma20"]   = _get_sma20_from_cache(code)
+            result["_5d_high"] = _get_5d_high_from_cache(code)
+            analysis_results[code] = result
         except Exception as e:
             print(f"  ⚠️  {name}({code}) 기술분석 실패: {e}", file=sys.stderr)
             analysis_results[code] = None
@@ -124,13 +128,35 @@ def run(dry_run: bool = False):
     try:
         state = StateManager()
         # 장마감 기준 시그널 업데이트
-        holdings_signals = {
-            h["code"]: {
-                "signal":  (analysis_results.get(h["code"]) or {}).get("verdict", "WATCH"),
-                "pnl_pct": h.get("pnl_pct", 0.0),
+        holdings_signals = {}
+        for h in holdings:
+            code     = h["code"]
+            analysis = analysis_results.get(code) or {}
+            avg      = h.get("avg_price", 0.0)
+            verdict  = analysis.get("verdict", "WATCH")
+
+            # 타점 계산 (strategy_config 기준)
+            sma20   = analysis.get("_sma20")
+            high5d  = analysis.get("_5d_high")
+            entry_low  = round(sma20  * 1.005, 0) if sma20  else None  # 눌림 진입
+            entry_high = round(high5d * 1.005, 0) if high5d else None  # 돌파 진입
+            exit_low   = round(avg * 0.97, 0)    if avg else None      # 손절 (하드스탑 -3%)
+            exit_high  = round(avg * 1.05, 0)    if avg else None      # 목표가 (+5%)
+
+            holdings_signals[code] = {
+                "name":       h.get("name", code),
+                "signal":     verdict,
+                "pnl_pct":    h.get("pnl_pct", 0.0),
+                "avg_price":  avg,
+                "cur_price":  h.get("current_price", 0.0),
+                "stop_loss":  analysis.get("stop_loss"),
+                "target":     analysis.get("target_price"),
+                # 매수/매도 타점 구간
+                "entry_low":  entry_low,
+                "entry_high": entry_high,
+                "exit_low":   exit_low,
+                "exit_high":  exit_high,
             }
-            for h in holdings
-        }
         state.update("holdings", holdings_signals, caller="closing_report")
         # 거래량 급등 종목 기록
         for h in holdings:
@@ -416,8 +442,8 @@ def _build_closing_report(today_str, holdings, daily_data, strategies, cash_info
     today_fee      = cash_info.get("today_fee", 0)
     eval_pnl       = cash_info.get("eval_pnl", 0)
 
-    # 총자산: API 순자산 우선, 없으면 주식+예수금 합산
-    display_net   = net_asset if net_asset > 0 else (total_eval + deposit)
+    # 총자산: tot_evlu_amt(총평가금액) 기준 — morning_report와 동일 로직
+    display_net   = total_eval if total_eval > 0 else (net_asset if net_asset > 0 else (total_eval + deposit))
     # 유가평가: API 값 우선, 없으면 보유종목 합산
     display_stock = stock_eval_api if stock_eval_api > 0 else total_eval
     # 자산증감: API 직접 제공, 없으면 계산
@@ -437,7 +463,33 @@ def _build_closing_report(today_str, holdings, daily_data, strategies, cash_info
     lines.append(f"  유가평가금액: {display_stock:>12,.0f}원")
     if prev_net_asset > 0:
         lines.append(f"  전일순자산:   {prev_net_asset:>12,.0f}원")
-        lines.append(f"  {asset_emoji} 자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)")
+        # 자산증감 — 입출금 왜곡 감지 및 역산 (morning_report와 동일)
+        _chg_threshold = prev_net_asset * 0.05  # 5% 초과 시 입출금 의심
+        if abs(asset_chg) > _chg_threshold:
+            lines.append(
+                f"  ⚠️  자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)"
+            )
+            # 전일 평가손익이 state에 있으면 정확한 역산, 없으면 안내
+            try:
+                _state    = StateManager()
+                _prev_pnl = _state.get("financials.eval_pnl")
+                if _prev_pnl is not None and _prev_pnl != 0:
+                    _pnl_change = eval_pnl - _prev_pnl
+                    _transfer   = asset_chg - _pnl_change
+                    _t_emoji    = "📤" if _transfer < 0 else "📥"
+                    lines.append(
+                        f"  {_t_emoji} 이체금액(예상): {_transfer:>+11,.0f}원  (전일 기록 기반)"
+                    )
+                else:
+                    lines.append(
+                        f"  ℹ️  이체금액 역산 불가 — 내일부터 전일 기록 기반으로 자동 제공"
+                    )
+            except Exception:
+                lines.append(
+                    f"  ℹ️  이체금액 역산 불가 — 내일부터 전일 기록 기반으로 자동 제공"
+                )
+        else:
+            lines.append(f"  {asset_emoji} 자산증감:   {asset_chg:>+12,.0f}원 ({asset_chg_pct:+.2f}%)")
 
     # 정산현황
     lines.append(f"\n📊 정산현황")
@@ -706,6 +758,51 @@ def _parse_cash(balance_raw) -> dict:
         "today_fee": today_fee,
         "eval_pnl": eval_pnl,
     }
+
+
+def _get_sma20_from_cache(code: str) -> float | None:
+    """캐시된 일봉에서 SMA20 계산."""
+    try:
+        import json as _json, glob, pandas as pd
+        files = sorted(glob.glob(str(_ROOT / "data" / "raw" / f"{code}_daily_*.json")))
+        if not files:
+            return None
+        bars = _json.loads(Path(files[-1]).read_text(encoding="utf-8"))
+        df = pd.DataFrame(bars)
+        col = next((c for c in ["stck_clpr", "close"] if c in df.columns), None)
+        if not col:
+            return None
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.dropna(subset=[col])
+        if len(df) < 20:
+            return None
+        # KIS는 최신이 첫 행 → 역순 정렬 후 SMA20
+        closes = df[col].iloc[::-1].reset_index(drop=True)
+        return round(float(closes.tail(20).mean()), 0)
+    except Exception:
+        return None
+
+
+def _get_5d_high_from_cache(code: str) -> float | None:
+    """캐시된 일봉에서 최근 5일 고가 반환."""
+    try:
+        import json as _json, glob, pandas as pd
+        files = sorted(glob.glob(str(_ROOT / "data" / "raw" / f"{code}_daily_*.json")))
+        if not files:
+            return None
+        bars = _json.loads(Path(files[-1]).read_text(encoding="utf-8"))
+        df = pd.DataFrame(bars)
+        col = next((c for c in ["stck_hgpr", "high"] if c in df.columns), None)
+        if not col:
+            return None
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.dropna(subset=[col])
+        if len(df) < 1:
+            return None
+        # KIS는 최신이 첫 행 → 첫 5행이 최근 5일
+        return round(float(df[col].iloc[:5].max()), 0)
+    except Exception:
+        return None
 
 
 def _save_report_fallback(report: str, today_date: str):

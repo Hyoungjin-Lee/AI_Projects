@@ -57,9 +57,8 @@ def retry(max_attempts=3, delay=2, exceptions=(requests.Timeout, requests.Connec
 
 # ── 미국 시장 지수 ────────────────────────────────────────────────────────────
 
-@retry(max_attempts=3, delay=2)
 def fetch_us_market() -> dict:
-    """Yahoo Finance 비공식 API로 미국 주요 지수 수집."""
+    """yfinance로 미국 주요 지수 수집."""
     result = {
         "sp500": None, "sp500_chg": None,
         "nasdaq": None, "nasdaq_chg": None,
@@ -75,48 +74,49 @@ def fetch_us_market() -> dict:
         "^VIX":  ("vix",    None),
     }
 
-    for symbol, (val_key, chg_key) in symbols.items():
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
-            resp = requests.get(url, headers=_HEADERS, timeout=10)
-            data = resp.json()
-            meta = data["chart"]["result"][0]["meta"]
-            curr = round(meta.get("regularMarketPrice", 0), 2)
-            result[val_key] = curr
-
-            if chg_key:
-                prev = meta.get("previousClose", 0)
-                if prev:
+    try:
+        import yfinance as yf
+        tickers = yf.Tickers(" ".join(symbols.keys()))
+        for symbol, (val_key, chg_key) in symbols.items():
+            try:
+                info = tickers.tickers[symbol].fast_info
+                curr = round(float(info.last_price), 2)
+                prev = float(info.previous_close or 0)
+                result[val_key] = curr
+                if chg_key and prev:
                     chg_pct = (curr - prev) / prev * 100
                     result[chg_key] = f"{chg_pct:+.2f}%"
-            time.sleep(0.3)
-        except Exception as e:
-            print(f"[미국지수] {symbol} 수집 실패: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"[미국지수] {symbol} 수집 실패: {e}", file=sys.stderr)
+    except ImportError:
+        print("[미국지수] yfinance 미설치 — 지수 수집 생략", file=sys.stderr)
+    except Exception as e:
+        print(f"[미국지수] 전체 수집 실패: {e}", file=sys.stderr)
 
     return result
 
 
 # ── 달러/원 환율 ──────────────────────────────────────────────────────────────
 
-@retry(max_attempts=3, delay=2)
 def fetch_usd_krw() -> dict:
-    """달러/원 환율 수집 (Yahoo Finance)."""
+    """달러/원 환율 수집 (yfinance)."""
     try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/USDKRW=X?interval=1d&range=2d"
-        resp = requests.get(url, headers=_HEADERS, timeout=10)
-        data = resp.json()
-        meta = data["chart"]["result"][0]["meta"]
-        curr = meta.get("regularMarketPrice", 0)
-        prev = meta.get("previousClose", 0)
-        chg = curr - prev
+        import yfinance as yf
+        fx = yf.Ticker("USDKRW=X")
+        info = fx.fast_info
+        curr = round(float(info.last_price), 1)
+        prev = float(info.previous_close or 0)
+        chg  = curr - prev
         return {
-            "usd_krw":         round(curr, 1),
+            "usd_krw":         curr,
             "usd_krw_chg":     round(chg, 1),
             "usd_krw_chg_pct": f"{chg/prev*100:+.2f}%" if prev else "N/A",
         }
+    except ImportError:
+        print("[환율] yfinance 미설치", file=sys.stderr)
     except Exception as e:
         print(f"[환율] 수집 실패: {e}", file=sys.stderr)
-        return {"usd_krw": None, "usd_krw_chg": None, "usd_krw_chg_pct": None}
+    return {"usd_krw": None, "usd_krw_chg": None, "usd_krw_chg_pct": None}
 
 
 # ── 종목 뉴스 ─────────────────────────────────────────────────────────────────

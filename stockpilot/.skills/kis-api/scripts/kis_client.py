@@ -203,6 +203,19 @@ class KISClient:
             params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code},
         )["output"]
 
+    def get_ccnl(self, code: str) -> dict:
+        """최근 체결 내역 + 당일 체결강도 (FHKST01010300).
+        반환: output[0] dict — stck_prpr, tday_rltv, prdy_ctrt, cntg_vol 포함.
+        체결강도(tday_rltv)는 배열 첫 번째 row가 현재 시점값.
+        """
+        resp = self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-ccnl",
+            tr_id="FHKST01010300",
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code},
+        )
+        rows = resp.get("output", [])
+        return rows[0] if rows else {}
+
     def get_orderbook(self, code: str) -> dict:
         """10단계 호가 + 잔량."""
         return self._get(
