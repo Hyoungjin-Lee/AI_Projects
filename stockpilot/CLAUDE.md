@@ -67,6 +67,8 @@ venv/bin/python3 morning_report/morning_report.py --dry-run
 venv/bin/python3 morning_report/closing_report.py --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 3 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 4 --dry-run
 
 # Keychain 상태 확인 / 재설정
 venv/bin/python3 morning_report/keychain_manager.py
@@ -108,6 +110,8 @@ aigit_upload
 | 08:30 | `morning_report.py` |
 | 09:03 | `intraday_discovery.py --round 1` |
 | 09:05 | `intraday_discovery.py --round 2` |
+| 09:30 | `intraday_discovery.py --round 3` |
+| 09:33 | `intraday_discovery.py --round 4` |
 | 09:10 | `intraday_report.py` |
 | 20:30 | `closing_report.py` |
 | 23:30 | `stock_discovery.py` (월~토) |

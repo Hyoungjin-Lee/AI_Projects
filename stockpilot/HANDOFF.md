@@ -1,6 +1,6 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-21 (v2.5 — Phase 1 발굴 성과 추적 DB + 메시지 개선)
+> 최종 업데이트: 2026-04-21 (v2.6 — intraday_discovery round 3/4 추가)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -24,6 +24,8 @@
 | 08:30 | `morning_report.py` | 모닝 브리핑 텔레그램 전송 + state 기록 |
 | 09:03 | `intraday_discovery.py --round 1` | 장초기 1차 수집 (거래량/체결강도/등락률 상위 30) |
 | 09:05 | `intraday_discovery.py --round 2` | 2차 수집 → 교집합 → 점수 산정 → 텔레그램 전송 |
+| 09:30 | `intraday_discovery.py --round 3` | 장중 3차 수집 (09:30분대 재발굴용) |
+| 09:33 | `intraday_discovery.py --round 4` | 4차 수집 → 재교집합 → 오전 발굴 추적 + 텔레그램 전송 |
 | 09:10 | `intraday_report.py` | 장초기 현황 텔레그램 전송 + state 기록 |
 | 20:30 | `closing_report.py` | 장마감 결산 텔레그램 전송 + state 기록 |
 | 23:30 | `stock_discovery.py` | 야간 종목 발굴 텔레그램 전송 + state 기록 (월~토) |
@@ -224,6 +226,19 @@ inject_to_env()  # 반드시 첫 줄에 호출
 - 설계 문서: `docs/08_phase1_intraday/`
 - 최종 검증: `docs/notes/final_validation.md`
 
+### ✅ Phase 1.1 — intraday_discovery round 3/4 (완료, Stage 11 검증 통과)
+- `--round 3` 추가: 09:30분대 재발굴용 수집 state 저장
+- `--round 4` 추가: 09:33 재교집합 분석 + `⭐재확인` 표시
+- 오전 round2 발굴 종목 상위 5개 현재가 추적 섹션 추가
+- launchd plist 추가: `com.aigeenya.stockreport.discovery3.plist`, `com.aigeenya.stockreport.discovery4.plist`
+- Stage 11 Opus 검증 3건 수정: `_fetch_current_price()` 정리, round2 없을 때 경고 처리
+- 설계 문서: `docs/09_round34/`
+
+### ✅ 핫픽스 — intraday_report.py 갭 방향 버그 수정
+- **버그:** `prev_close = cur_price` (09:10 현재가를 전일종가로 착각 → 갭 방향 오계산)
+- **수정:** `get_daily_chart()`로 실제 전일 종가(`stck_clpr`) 조회, fallback은 분봉 첫 시가
+- **영향:** GS건설 등 상승출발 종목이 "하락출발"로 잘못 표시되던 문제 해결
+
 ---
 
 ## 9. Phase별 로드맵
@@ -231,6 +246,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 | Phase | 내용 | 상태 |
 |-------|------|------|
 | **Phase 1** | intraday_discovery 고도화 | ✅ 완료 |
+| **Phase 1.1** | intraday_discovery round 3/4 | ✅ 완료 |
 | **Phase 1.5** | 모닝 리포트에 전날 발굴 성과 요약 추가 | 🔜 데이터 쌓인 후 |
 | **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 다음 |
 | **Phase 3** | 보유 포지션 평단 관리 자동화 | 🔜 Phase 2 후 |
@@ -242,6 +258,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ### 🔴 Stage 12 QA — Phase 1 실제 운영 검증
 - [ ] 내일 장 시작(09:03~09:05) round1 → round2 실행 후 `data/discovery_log.json` 생성 확인
+- [ ] 09:30~09:33 round3 → round4 실행 후 오전 추적 섹션/`⭐재확인` 표시 확인
 - [ ] 20:30 closing_report 실행 후 `close_price`, `return_pct` 업데이트 확인
 - [ ] 텔레그램 메시지에 "추가 관심 후보" 섹션 정상 표시 확인
 
@@ -263,6 +280,8 @@ venv/bin/python3 morning_report/morning_report.py --dry-run
 venv/bin/python3 morning_report/closing_report.py --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 3 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 4 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --debug
 
 # 현재가 즉시 조회
@@ -320,14 +339,14 @@ aigit_upload
 
 ---
 
-*자동 생성 | stockpilot v2.3 — AI 주식 자동화 시스템*
+*자동 생성 | stockpilot v2.6 — AI 주식 자동화 시스템*
 
 ---
 
 ## 📋 다음 세션 시작 프롬프트
 
 > 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
-> 마지막 갱신: 2026-04-21 (v2.5)
+> 마지막 갱신: 2026-04-21 (v2.6)
 
 ```
 stockpilot 프로젝트 이어서 진행해줘.
@@ -335,19 +354,18 @@ HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
 경로: /Users/geenya/projects/AI_Projects/stockpilot/
 
 현재 상태 요약:
-- v2.5 완료 (2026-04-21)
-- [Phase 1 완료] intraday_discovery 고도화 (Stage 9~11 검증 통과)
-  - 발굴 성과 추적 DB: data/discovery_log.json 자동 기록
-  - closing_report 장마감 시 종가·수익률 자동 업데이트
-  - 텔레그램 메시지 4~5위 추가 관심 후보 섹션 추가
-  - 설계 문서: docs/08_phase1_intraday/
-- CLAUDE.md에 워크플로우 역할 규칙 및 협업 체크포인트 추가
-  - Stage 1 브레인스토밍: 형진님과 대화하며 방향 잡기 (혼자 작성 금지)
-  - Stage 4 완료 후: 형진님 승인 필수, 승인 없이 Stage 5 진입 금지
+- v2.6 완료 (2026-04-21)
+- [Phase 1.1 완료] intraday_discovery round 3/4 추가 (Stage 11 검증 통과)
+  - round 3 (09:30) 수집, round 4 (09:33) 재교집합 분석 + 오전 추적 + ⭐재확인 태그
+  - launchd plist 등록: discovery3, discovery4
+  - 설계 문서: docs/09_round34/
+- [핫픽스 완료] intraday_report.py 갭 방향 버그 수정
+  - prev_close = cur_price → get_daily_chart()로 실제 전일종가 조회
 
 다음 할 작업:
-1. [Stage 12 QA] Phase 1 실제 운영 검증
+1. [Stage 12 QA] Phase 1 + Phase 1.1 실제 운영 검증
    - 장 시작(09:03~09:05) round1→round2 후 discovery_log.json 확인
+   - 09:30~09:33 round3→round4 후 오전 추적 섹션 / ⭐재확인 표시 확인
    - 20:30 closing_report 후 close_price, return_pct 업데이트 확인
 2. [Phase 2] 텔레그램 /매수 /매도 명령 구현 (Stage 1 브레인스토밍부터 시작)
 

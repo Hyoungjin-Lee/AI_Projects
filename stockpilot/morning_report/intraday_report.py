@@ -75,7 +75,7 @@ def run(dry_run: bool = False):
         name = h["name"]
         try:
             bars = client.get_minute_chart(code, hhmm="091000")
-            result = _analyze_intraday(bars, h)
+            result = _analyze_intraday(bars, h, client=client, code=code)
             intraday_results[code] = result
             print(f"  ✅ {name}({code}) 분봉 분석 완료", file=sys.stderr)
         except Exception as e:
@@ -125,7 +125,7 @@ def run(dry_run: bool = False):
             print(f"[저장] {fname}", file=sys.stderr)
 
 
-def _analyze_intraday(bars: list, holding: dict) -> dict:
+def _analyze_intraday(bars: list, holding: dict, client=None, code: str = None) -> dict:
     """
     1분봉 데이터로 장초기 상황 분석.
 
@@ -161,11 +161,32 @@ def _analyze_intraday(bars: list, holding: dict) -> dict:
     if df.empty:
         return {"direction": "데이터없음", "action": "분봉 파싱 실패 — 수동 확인 필요"}
 
-    # 갭 분석 (첫 봉 시가 vs 보유 평균단가/전일종가)
+    # 갭 분석 (첫 봉 시가 vs 전일종가)
     first_open = df["open"].iloc[0] if "open" in df.columns else df["close"].iloc[0]
     avg_price  = holding.get("avg_price", 0)
-    cur_price  = holding.get("current_price", first_open)
-    prev_close = cur_price  # 전일종가 근사치로 현재가 사용
+
+    # 전일종가: 일봉 API에서 직접 조회 (정확도 우선)
+    prev_close = 0
+    if client and code:
+        try:
+            daily = client.get_daily_chart(code, days=5)
+            if daily and isinstance(daily, list):
+                today_str_compact = datetime.now().strftime("%Y%m%d")
+                # 오늘 날짜를 제외한 가장 최근 봉의 종가
+                for row in daily:
+                    row_date = row.get("stck_bsop_date", "")
+                    if row_date and row_date < today_str_compact:
+                        prev_close = int(float(row.get("stck_clpr", 0)) or 0)
+                        break
+                # 오늘 장 중이라 오늘 행이 없을 수도 있으므로 첫 번째도 시도
+                if prev_close == 0 and daily:
+                    prev_close = int(float(daily[0].get("stck_clpr", 0)) or 0)
+        except Exception:
+            pass
+
+    # fallback: 일봉 조회 실패 시 분봉 첫 봉 시가 근사 사용
+    if not prev_close:
+        prev_close = first_open
 
     gap_pct = (first_open - prev_close) / prev_close * 100 if prev_close else 0
 

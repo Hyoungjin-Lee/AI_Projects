@@ -1,0 +1,41 @@
+[
+  {
+    "date": "2026-04-21",
+    "disc_time": "09:05",
+    "code": "375500",
+    "name": "DL이앤씨",
+    "disc_price": 98300,
+    "score": 5,
+    "pow_2": 245.7,
+    "flc_2": 2.93,
+    "close_price": null,
+    "return_pct": null,
+    "updated_at": null
+  },
+  {
+    "date": "2026-04-21",
+    "disc_time": "09:05",
+    "code": "018880",
+    "name": "한온시스템",
+    "disc_price": 4280,
+    "score": 4,
+    "pow_2": 208.4,
+    "flc_2": 4.27,
+    "close_price": null,
+    "return_pct": null,
+    "updated_at": null
+  },
+  {
+    "date": "2026-04-21",
+    "disc_time": "09:05",
+    "code": "004020",
+    "name": "현대제철",
+    "disc_price": 40000,
+    "score": 4,
+    "pow_2": 203.5,
+    "flc_2": 4.29,
+    "close_price": null,
+    "return_pct": null,
+    "updated_at": null
+  }
+]
