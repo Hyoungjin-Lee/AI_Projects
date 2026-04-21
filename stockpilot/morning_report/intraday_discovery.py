@@ -6,6 +6,10 @@ intraday_discovery.py — 장초기 실시간 종목 발굴
   venv/bin/python3 morning_report/intraday_discovery.py --round 2
   venv/bin/python3 morning_report/intraday_discovery.py --round 3
   venv/bin/python3 morning_report/intraday_discovery.py --round 4
+  venv/bin/python3 morning_report/intraday_discovery.py --round 5
+  venv/bin/python3 morning_report/intraday_discovery.py --round 6
+  venv/bin/python3 morning_report/intraday_discovery.py --round 7
+  venv/bin/python3 morning_report/intraday_discovery.py --round 8
   venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
 """
 
@@ -64,7 +68,15 @@ def run(round_no: int, dry_run: bool = False, debug: bool = False) -> int:
         return _run_round2(client, state, dry_run=dry_run, debug=debug)
     if round_no == 3:
         return _run_round3(client, state)
-    return _run_round4(client, state, dry_run=dry_run, debug=debug)
+    if round_no == 4:
+        return _run_round4(client, state, dry_run=dry_run, debug=debug)
+    if round_no == 5:
+        return _run_round5(client, state)
+    if round_no == 6:
+        return _run_round6(client, state, dry_run=dry_run, debug=debug)
+    if round_no == 7:
+        return _run_round7(client, state)
+    return _run_round8(client, state, dry_run=dry_run, debug=debug)
 
 
 def _run_round1(client, state: StateManager) -> int:
@@ -108,6 +120,52 @@ def _run_round3(client, state: StateManager) -> int:
     print(
         f"[완료] round3 저장 완료 "
         f"(거래량 {len(round3['vol'])} / 체결강도 {len(round3['pow'])} / 등락률 {len(round3['flc'])})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _run_round5(client, state: StateManager) -> int:
+    volume_rows = _fetch_volume_rank(client)
+    power_rows = _fetch_power_rank(client)
+    fluct_rows = _fetch_fluctuation_rank(client)
+
+    round5 = {
+        "time": datetime.now().strftime("%H:%M"),
+        "vol": _extract_codes(volume_rows),
+        "pow": _extract_metric_map(power_rows, "tday_rltv"),
+        "flc": _extract_metric_map(fluct_rows, "prdy_ctrt"),
+        "acml_vol": _extract_metric_map(volume_rows, "acml_vol"),
+        "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
+    }
+
+    state.update("intraday_discovery", {"round5": round5}, caller="intraday_discovery")
+    print(
+        f"[완료] round5 저장 완료 "
+        f"(거래량 {len(round5['vol'])} / 체결강도 {len(round5['pow'])} / 등락률 {len(round5['flc'])})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _run_round7(client, state: StateManager) -> int:
+    volume_rows = _fetch_volume_rank(client)
+    power_rows = _fetch_power_rank(client)
+    fluct_rows = _fetch_fluctuation_rank(client)
+
+    round7 = {
+        "time": datetime.now().strftime("%H:%M"),
+        "vol": _extract_codes(volume_rows),
+        "pow": _extract_metric_map(power_rows, "tday_rltv"),
+        "flc": _extract_metric_map(fluct_rows, "prdy_ctrt"),
+        "acml_vol": _extract_metric_map(volume_rows, "acml_vol"),
+        "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
+    }
+
+    state.update("intraday_discovery", {"round7": round7}, caller="intraday_discovery")
+    print(
+        f"[완료] round7 저장 완료 "
+        f"(거래량 {len(round7['vol'])} / 체결강도 {len(round7['pow'])} / 등락률 {len(round7['flc'])})",
         file=sys.stderr,
     )
     return 0
@@ -382,6 +440,295 @@ def _run_round4(client, state: StateManager, dry_run: bool = False, debug: bool 
     state.update("intraday_discovery", {"round4": round4}, caller="intraday_discovery")
 
     message = _build_message_round4(round4["time"], top_picks, len(scored), tracking=tracking, all_scored=scored)
+    if dry_run:
+        print("\n" + "=" * 50)
+        print(message)
+        print("=" * 50)
+        print("\n[DRY-RUN] 텔레그램 전송 생략")
+        return 0
+
+    try:
+        from telegram_sender import send_text
+        ok = send_text(message)
+    except Exception as exc:
+        print(f"[오류] 텔레그램 전송 실패: {exc}", file=sys.stderr)
+        return 1
+
+    if ok:
+        print(f"[완료] 텔레그램 전송 성공 ({len(scored)}개 후보)", file=sys.stderr)
+        return 0
+
+    print("[오류] 텔레그램 전송 실패", file=sys.stderr)
+    return 1
+
+
+def _run_round6(client, state: StateManager, dry_run: bool = False, debug: bool = False) -> int:
+    round5 = state.get("intraday_discovery.round5")
+    if not isinstance(round5, dict):
+        print("[오류] round5 데이터가 없습니다. 먼저 --round 5 를 실행하세요.", file=sys.stderr)
+        return 1
+
+    volume_rows = _fetch_volume_rank(client)
+    power_rows = _fetch_power_rank(client)
+    fluct_rows = _fetch_fluctuation_rank(client)
+    disparity_rows = _fetch_disparity_rank(client)
+    hts_rows = _fetch_hts_rank(client)
+
+    vol_5 = set(round5.get("vol", []))
+    vol_6 = set(_extract_codes(volume_rows))
+    pow_5 = set((round5.get("pow") or {}).keys())
+    pow_6 = set(_extract_metric_map(power_rows, "tday_rltv").keys())
+    flc_5 = set((round5.get("flc") or {}).keys())
+    flc_6 = set(_extract_metric_map(fluct_rows, "prdy_ctrt").keys())
+
+    if debug:
+        print("\n" + "=" * 55, file=sys.stderr)
+        print("🔬 [DEBUG] round6 단계별 필터 진단", file=sys.stderr)
+        print("=" * 55, file=sys.stderr)
+        print(f"  [R5] 거래량 상위:   {len(vol_5)}종목  {sorted(vol_5)[:5]}...", file=sys.stderr)
+        print(f"  [R6] 거래량 상위:   {len(vol_6)}종목", file=sys.stderr)
+        print(f"  [R5] 체결강도 상위: {len(pow_5)}종목", file=sys.stderr)
+        print(f"  [R6] 체결강도 상위: {len(pow_6)}종목", file=sys.stderr)
+        print(f"  [R5] 등락률 상위:   {len(flc_5)}종목", file=sys.stderr)
+        print(f"  [R6] 등락률 상위:   {len(flc_6)}종목", file=sys.stderr)
+        step1 = vol_5 & vol_6
+        step2 = step1 & pow_5 & pow_6
+        step3 = step2 & flc_5 & flc_6
+        print(f"\n  ① 거래량 R5∩R6:              {len(step1)}종목  {sorted(step1)}", file=sys.stderr)
+        print(f"  ② ①∩체결강도R5∩R6:          {len(step2)}종목  {sorted(step2)}", file=sys.stderr)
+        print(f"  ③ ②∩등락률R5∩R6 (교집합):   {len(step3)}종목  {sorted(step3)}", file=sys.stderr)
+
+    candidates = vol_5 & vol_6 & pow_5 & pow_6 & flc_5 & flc_6
+    overheated = {
+        code for code, value in _extract_metric_map(disparity_rows, "d20_dsrt").items()
+        if value >= 120
+    }
+
+    if debug:
+        print(f"\n  ④ 과열 제외 (이격도≥120):    {len(candidates & overheated)}종목 제외  {sorted(candidates & overheated)}", file=sys.stderr)
+
+    filtered = sorted(code for code in candidates if code not in overheated)
+
+    if debug:
+        print(f"  ⑤ 최종 후보 (필터 후):       {len(filtered)}종목  {filtered}", file=sys.stderr)
+
+    hts_top = _extract_codes(hts_rows)[:_HTS_TOP_N]
+    hts_ranks = {code: idx + 1 for idx, code in enumerate(hts_top)}
+
+    names = {}
+    names.update(round5.get("names") or {})
+    names.update(_extract_name_map(volume_rows, power_rows, fluct_rows, disparity_rows, hts_rows))
+
+    metrics = {
+        "pow_1": round5.get("pow", {}) or {},
+        "pow_2": _extract_metric_map(power_rows, "tday_rltv"),
+        "flc_1": round5.get("flc", {}) or {},
+        "flc_2": _extract_metric_map(fluct_rows, "prdy_ctrt"),
+        "vol_1": round5.get("acml_vol", {}) or {},
+        "vol_2": _extract_metric_map(volume_rows, "acml_vol"),
+        "disparity": _extract_metric_map(disparity_rows, "d20_dsrt"),
+    }
+
+    scored = []
+    skipped_score = []
+    for code in filtered:
+        item = _score_candidate(code, names, metrics, hts_ranks)
+        if item is not None:
+            scored.append(item)
+        else:
+            skipped_score.append(code)
+
+    if debug:
+        print(f"\n  ⑥ 점수 산정 탈락:                 {len(skipped_score)}종목  {skipped_score}", file=sys.stderr)
+        print(f"  ⑦ 최종 점수 통과:                 {len(scored)}종목", file=sys.stderr)
+        for item in sorted(scored, key=lambda x: -x["score"]):
+            print(
+                f"     {item['name']}({item['code']})  "
+                f"점수:{item['score']}  "
+                f"체결강도:{item['pow_2']:.0f}(R5:{item['pow_1']:.0f})  "
+                f"등락률:{item['flc_2']:+.1f}%(R5:{item['flc_1']:+.1f}%)",
+                file=sys.stderr,
+            )
+        print("=" * 55 + "\n", file=sys.stderr)
+
+    scored.sort(key=lambda item: (-item["score"], -item["pow_2"], -item["flc_2"], item["code"]))
+    top_picks = scored[:3]
+
+    round6 = {
+        "time": datetime.now().strftime("%H:%M"),
+        "candidate_count": len(scored),
+        "overheated_count": len(candidates & overheated),
+        "candidates": [
+            {
+                "code": item["code"],
+                "name": item["name"],
+                "score": item["score"],
+                "pow_2": item["pow_2"],
+                "pow_delta": item["pow_delta"],
+                "flc_2": item["flc_2"],
+                "flc_delta": item["flc_delta"],
+                "vol_delta": item["vol_delta"],
+                "hts_rank": item["hts_rank"],
+                "disc_price": _extract_metric_map(volume_rows, "stck_prpr").get(item["code"], 0),
+            }
+            for item in scored
+        ],
+        "top_picks": [item["code"] for item in top_picks],
+    }
+    state.update("intraday_discovery", {"round6": round6}, caller="intraday_discovery")
+
+    _save_discovery_log(scored, volume_rows, session="afternoon")
+
+    message = _build_message_afternoon(round6["time"], top_picks, len(scored), all_scored=scored)
+    if dry_run:
+        print("\n" + "=" * 50)
+        print(message)
+        print("=" * 50)
+        print("\n[DRY-RUN] 텔레그램 전송 생략")
+        return 0
+
+    try:
+        from telegram_sender import send_text
+        ok = send_text(message)
+    except Exception as exc:
+        print(f"[오류] 텔레그램 전송 실패: {exc}", file=sys.stderr)
+        return 1
+
+    if ok:
+        print(f"[완료] 텔레그램 전송 성공 ({len(scored)}개 후보)", file=sys.stderr)
+        return 0
+
+    print("[오류] 텔레그램 전송 실패", file=sys.stderr)
+    return 1
+
+
+def _run_round8(client, state: StateManager, dry_run: bool = False, debug: bool = False) -> int:
+    round7 = state.get("intraday_discovery.round7")
+    if not isinstance(round7, dict):
+        print("[오류] round7 데이터가 없습니다. 먼저 --round 7 을 실행하세요.", file=sys.stderr)
+        return 1
+
+    volume_rows = _fetch_volume_rank(client)
+    power_rows = _fetch_power_rank(client)
+    fluct_rows = _fetch_fluctuation_rank(client)
+    disparity_rows = _fetch_disparity_rank(client)
+    hts_rows = _fetch_hts_rank(client)
+
+    vol_7 = set(round7.get("vol", []))
+    vol_8 = set(_extract_codes(volume_rows))
+    pow_7 = set((round7.get("pow") or {}).keys())
+    pow_8 = set(_extract_metric_map(power_rows, "tday_rltv").keys())
+    flc_7 = set((round7.get("flc") or {}).keys())
+    flc_8 = set(_extract_metric_map(fluct_rows, "prdy_ctrt").keys())
+
+    if debug:
+        print("\n" + "=" * 55, file=sys.stderr)
+        print("🔬 [DEBUG] round8 단계별 필터 진단", file=sys.stderr)
+        print("=" * 55, file=sys.stderr)
+        print(f"  [R7] 거래량 상위:   {len(vol_7)}종목  {sorted(vol_7)[:5]}...", file=sys.stderr)
+        print(f"  [R8] 거래량 상위:   {len(vol_8)}종목", file=sys.stderr)
+        print(f"  [R7] 체결강도 상위: {len(pow_7)}종목", file=sys.stderr)
+        print(f"  [R8] 체결강도 상위: {len(pow_8)}종목", file=sys.stderr)
+        print(f"  [R7] 등락률 상위:   {len(flc_7)}종목", file=sys.stderr)
+        print(f"  [R8] 등락률 상위:   {len(flc_8)}종목", file=sys.stderr)
+        step1 = vol_7 & vol_8
+        step2 = step1 & pow_7 & pow_8
+        step3 = step2 & flc_7 & flc_8
+        print(f"\n  ① 거래량 R7∩R8:              {len(step1)}종목  {sorted(step1)}", file=sys.stderr)
+        print(f"  ② ①∩체결강도R7∩R8:          {len(step2)}종목  {sorted(step2)}", file=sys.stderr)
+        print(f"  ③ ②∩등락률R7∩R8 (교집합):   {len(step3)}종목  {sorted(step3)}", file=sys.stderr)
+
+    candidates = vol_7 & vol_8 & pow_7 & pow_8 & flc_7 & flc_8
+    overheated = {
+        code for code, value in _extract_metric_map(disparity_rows, "d20_dsrt").items()
+        if value >= 120
+    }
+
+    if debug:
+        print(f"\n  ④ 과열 제외 (이격도≥120):    {len(candidates & overheated)}종목 제외  {sorted(candidates & overheated)}", file=sys.stderr)
+
+    filtered = sorted(code for code in candidates if code not in overheated)
+
+    if debug:
+        print(f"  ⑤ 최종 후보 (필터 후):       {len(filtered)}종목  {filtered}", file=sys.stderr)
+
+    hts_top = _extract_codes(hts_rows)[:_HTS_TOP_N]
+    hts_ranks = {code: idx + 1 for idx, code in enumerate(hts_top)}
+
+    names = {}
+    names.update(round7.get("names") or {})
+    names.update(_extract_name_map(volume_rows, power_rows, fluct_rows, disparity_rows, hts_rows))
+
+    metrics = {
+        "pow_1": round7.get("pow", {}) or {},
+        "pow_2": _extract_metric_map(power_rows, "tday_rltv"),
+        "flc_1": round7.get("flc", {}) or {},
+        "flc_2": _extract_metric_map(fluct_rows, "prdy_ctrt"),
+        "vol_1": round7.get("acml_vol", {}) or {},
+        "vol_2": _extract_metric_map(volume_rows, "acml_vol"),
+        "disparity": _extract_metric_map(disparity_rows, "d20_dsrt"),
+    }
+
+    scored = []
+    skipped_score = []
+    for code in filtered:
+        item = _score_candidate(code, names, metrics, hts_ranks)
+        if item is not None:
+            scored.append(item)
+        else:
+            skipped_score.append(code)
+
+    round6 = state.get("intraday_discovery.round6") or {}
+    if not isinstance(round6, dict) or not round6:
+        print("[경고] round6 데이터 없음 — 오후 발굴 추적 및 재확인 태그 생략", file=sys.stderr)
+    afternoon_candidates = round6.get("candidates", []) if isinstance(round6, dict) else []
+    afternoon_codes = {item.get("code") for item in afternoon_candidates if item.get("code")}
+    for item in scored:
+        item["is_reconfirmed"] = item["code"] in afternoon_codes
+
+    if debug:
+        print(f"\n  ⑥ 점수 산정 탈락:                 {len(skipped_score)}종목  {skipped_score}", file=sys.stderr)
+        print(f"  ⑦ 최종 점수 통과:                 {len(scored)}종목", file=sys.stderr)
+        for item in sorted(scored, key=lambda x: -x["score"]):
+            reconfirmed = " ⭐재확인" if item.get("is_reconfirmed") else ""
+            print(
+                f"     {item['name']}({item['code']}){reconfirmed}  "
+                f"점수:{item['score']}  "
+                f"체결강도:{item['pow_2']:.0f}(R7:{item['pow_1']:.0f})  "
+                f"등락률:{item['flc_2']:+.1f}%(R7:{item['flc_1']:+.1f}%)",
+                file=sys.stderr,
+            )
+        print("=" * 55 + "\n", file=sys.stderr)
+
+    scored.sort(key=lambda item: (-item["score"], -(1 if item.get("is_reconfirmed") else 0), -item["pow_2"], -item["flc_2"], item["code"]))
+    top_picks = scored[:3]
+    tracking = _fetch_afternoon_tracking(client, state)
+
+    round8 = {
+        "time": datetime.now().strftime("%H:%M"),
+        "candidate_count": len(scored),
+        "overheated_count": len(candidates & overheated),
+        "candidates": [
+            {
+                "code": item["code"],
+                "name": item["name"],
+                "score": item["score"],
+                "pow_2": item["pow_2"],
+                "pow_delta": item["pow_delta"],
+                "flc_2": item["flc_2"],
+                "flc_delta": item["flc_delta"],
+                "vol_delta": item["vol_delta"],
+                "hts_rank": item["hts_rank"],
+                "is_reconfirmed": item.get("is_reconfirmed", False),
+            }
+            for item in scored
+        ],
+        "top_picks": [item["code"] for item in top_picks],
+        "tracking": tracking,
+    }
+    state.update("intraday_discovery", {"round8": round8}, caller="intraday_discovery")
+
+    message = _build_message_round8(round8["time"], top_picks, len(scored), tracking=tracking, all_scored=scored)
     if dry_run:
         print("\n" + "=" * 50)
         print(message)
@@ -771,7 +1118,7 @@ def _trend_mark(delta: float) -> str:
     return ""
 
 
-def _save_discovery_log(scored: list[dict], volume_rows: list[dict]) -> None:
+def _save_discovery_log(scored: list[dict], volume_rows: list[dict], session: str = "morning") -> None:
     """발굴 결과를 data/discovery_log.json에 기록. 실패해도 예외 없이 경고만 출력."""
     try:
         from datetime import date as _date
@@ -798,12 +1145,13 @@ def _save_discovery_log(scored: list[dict], volume_rows: list[dict]) -> None:
         disc_time = datetime.now().strftime("%H:%M")
 
         # 오늘 날짜 기존 항목 제거 (재실행 시 덮어쓰기)
-        existing = [e for e in existing if e.get("date") != today]
+        existing = [e for e in existing if not (e.get("date") == today and e.get("session", "morning") == session)]
 
         # 새 항목 추가
         for item in scored:
             existing.append({
                 "date": today,
+                "session": session,
                 "disc_time": disc_time,
                 "code": item["code"],
                 "name": item["name"],
@@ -862,6 +1210,33 @@ def _fetch_morning_tracking(client, state: StateManager) -> list[dict[str, Any]]
             "cur_price": cur_price,
             "ret_pct": round(ret_pct, 2) if ret_pct is not None else None,
             "disc_time": round2.get("time", ""),
+        })
+    return results
+
+
+def _fetch_afternoon_tracking(client, state: StateManager) -> list[dict[str, Any]]:
+    """오후 round6 발굴 종목 상위 5개 현재가 추적."""
+    round6 = state.get("intraday_discovery.round6") or {}
+    if not isinstance(round6, dict) or not round6:
+        print("[경고] round6 데이터 없음 — 오후 발굴 추적 생략", file=sys.stderr)
+        return []
+    candidates = round6.get("candidates", []) if isinstance(round6, dict) else []
+    top5 = sorted(candidates, key=lambda x: -x.get("score", 0))[:5]
+    results = []
+    for item in top5:
+        code = item.get("code")
+        if not code:
+            continue
+        disc_price = item.get("disc_price", 0)
+        cur_price = _fetch_current_price(client, code)
+        ret_pct = (cur_price - disc_price) / disc_price * 100 if disc_price and cur_price else None
+        results.append({
+            "code": code,
+            "name": item.get("name", code),
+            "disc_price": disc_price,
+            "cur_price": cur_price,
+            "ret_pct": round(ret_pct, 2) if ret_pct is not None else None,
+            "disc_time": round6.get("time", ""),
         })
     return results
 
@@ -931,11 +1306,128 @@ def _build_message_round4(
     return "\n".join(lines)
 
 
+def _build_message_afternoon(
+    time_str: str,
+    top_picks: list[dict[str, Any]],
+    candidate_count: int,
+    all_scored: list[dict[str, Any]] | None = None,
+) -> str:
+    lines = [
+        f"🔍 오후장 종목 발굴 ({time_str})",
+        "―――――――――――――――",
+        "코스피200 14:03분대 분석",
+        "",
+    ]
+
+    if candidate_count == 0:
+        lines.append("교집합 종목 없음 — 오늘은 뚜렷한 신호 없음")
+        return "\n".join(lines)
+
+    for idx, item in enumerate(top_picks):
+        medal = _MEDALS[idx] if idx < len(_MEDALS) else f"{idx + 1}."
+        lines.append(f"{medal} {item['name']} ({item['code']})  {item['score']}점")
+        lines.append(
+            "   "
+            f"체결강도: {item['pow_2']:.0f}{_format_delta(item['pow_delta'], no_sign_if_zero=True)} "
+            f"| 등락률: {item['flc_2']:+.1f}%{_trend_mark(item['flc_delta'])} "
+            f"| {'거래량↑' if item['vol_delta'] > 0 else '거래량→'}"
+        )
+        if item["hts_rank"] is not None:
+            lines.append(f"   🌐 온라인 관심 {item['hts_rank']}위")
+        lines.append("")
+
+    if lines[-1] == "":
+        lines.pop()
+
+    if all_scored and len(all_scored) >= 4:
+        extra = all_scored[3:5]
+        lines.append("―――――――――――――――")
+        lines.append("📋 추가 관심 후보")
+        for rank, item in enumerate(extra, start=4):
+            lines.append(
+                f"  {rank}위 {item['name']} ({item['code']}) "
+                f"— 체결강도: {item['pow_2']:.0f} | {item['flc_2']:+.1f}%"
+            )
+
+    lines.extend(
+        [
+            "―――――――――――――――",
+            f"후보 {candidate_count}종목 → 상위 {min(3, len(top_picks))}종목 선정",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_message_round8(
+    time_str: str,
+    top_picks: list[dict[str, Any]],
+    candidate_count: int,
+    tracking: list[dict[str, Any]] | None = None,
+    all_scored: list[dict[str, Any]] | None = None,
+) -> str:
+    lines = [
+        f"🔍 오후장 종목 재발굴 ({time_str})",
+        "―――――――――――――――",
+        "코스피200 14:30분대 분석",
+        "",
+    ]
+
+    if candidate_count == 0:
+        lines.append("교집합 종목 없음 — 오늘은 뚜렷한 신호 없음")
+    else:
+        for idx, item in enumerate(top_picks):
+            medal = _MEDALS[idx] if idx < len(_MEDALS) else f"{idx + 1}."
+            reconfirmed = "  ⭐재확인" if item.get("is_reconfirmed") else ""
+            lines.append(f"{medal} {item['name']} ({item['code']})  {item['score']}점{reconfirmed}")
+            lines.append(
+                "   "
+                f"체결강도: {item['pow_2']:.0f}{_format_delta(item['pow_delta'], no_sign_if_zero=True)} "
+                f"| 등락률: {item['flc_2']:+.1f}%{_trend_mark(item['flc_delta'])} "
+                f"| {'거래량↑' if item['vol_delta'] > 0 else '거래량→'}"
+            )
+            lines.append("")
+
+        if lines[-1] == "":
+            lines.pop()
+
+        if all_scored and len(all_scored) >= 4:
+            extra = all_scored[3:5]
+            lines.append("―――――――――――――――")
+            lines.append("📋 추가 관심 후보")
+            for rank, item in enumerate(extra, start=4):
+                reconfirmed = "  ⭐재확인" if item.get("is_reconfirmed") else ""
+                lines.append(
+                    f"  {rank}위 {item['name']} ({item['code']}) "
+                    f"— 체결강도: {item['pow_2']:.0f} | {item['flc_2']:+.1f}%{reconfirmed}"
+                )
+
+    if tracking:
+        disc_time = tracking[0].get("disc_time", "")
+        suffix = f" (발굴 {disc_time} 기준)" if disc_time else ""
+        lines.append("―――――――――――――――")
+        lines.append(f"📊 오후 발굴 종목 추적{suffix}")
+        for idx, item in enumerate(tracking, start=1):
+            ret_text = f"({item['ret_pct']:+.1f}%)" if item.get("ret_pct") is not None else "(N/A)"
+            cur_text = f"{item['cur_price']:,}" if item.get("cur_price") else "N/A"
+            disc_text = f"{int(item['disc_price']):,}" if item.get("disc_price") else "N/A"
+            lines.append(
+                f"  {idx} {item['name']}  발굴가 {disc_text} → 현재 {cur_text}  {ret_text}"
+            )
+
+    lines.extend(
+        [
+            "―――――――――――――――",
+            f"후보 {candidate_count}종목 → 상위 {min(3, len(top_picks))}종목 선정",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="장초기 실시간 종목 발굴")
-    parser.add_argument("--round", dest="round_no", type=int, choices=[1, 2, 3, 4], required=True)
+    parser.add_argument("--round", dest="round_no", type=int, choices=[1, 2, 3, 4, 5, 6, 7, 8], required=True)
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 전송 없이 출력만 수행")
-    parser.add_argument("--debug", action="store_true", help="단계별 필터 진단 출력 (round 2/4 전용)")
+    parser.add_argument("--debug", action="store_true", help="단계별 필터 진단 출력 (round 2/4/6/8 전용)")
     args = parser.parse_args()
     return run(round_no=args.round_no, dry_run=args.dry_run, debug=args.debug)
 

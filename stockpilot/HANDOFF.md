@@ -1,6 +1,6 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-21 (v2.6 — intraday_discovery round 3/4 추가)
+> 최종 업데이트: 2026-04-21 (v2.7.2 — round 5~8 plist 14:03 원복 완료)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -27,9 +27,16 @@
 | 09:30 | `intraday_discovery.py --round 3` | 장중 3차 수집 (09:30분대 재발굴용) |
 | 09:33 | `intraday_discovery.py --round 4` | 4차 수집 → 재교집합 → 오전 발굴 추적 + 텔레그램 전송 |
 | 09:10 | `intraday_report.py` | 장초기 현황 텔레그램 전송 + state 기록 |
+| 14:03 | `intraday_discovery.py --round 5` | 오후장 1차 수집 (14:03분대 발굴용) |
+| 14:05 | `intraday_discovery.py --round 6` | 2차 수집 → 교집합 → 오후장 텔레그램 전송 |
+| 14:30 | `intraday_discovery.py --round 7` | 오후장 3차 수집 (14:30분대 재발굴용) |
+| 14:33 | `intraday_discovery.py --round 8` | 4차 수집 → 재교집합 → 오후 발굴 추적 + 텔레그램 전송 |
 | 20:30 | `closing_report.py` | 장마감 결산 텔레그램 전송 + state 기록 |
 | 23:30 | `stock_discovery.py` | 야간 종목 발굴 텔레그램 전송 + state 기록 (월~토) |
 | 상시  | `telegram_bot.py` | 텔레그램 명령 수신 (부팅 시 자동 시작) |
+
+> ✅ **v2.7.2 (2026-04-21):** round 5~8 plist 시각 14:03 원복 완료 (15:03 임시변경 테스트 취소).
+> 현재 등록 상태: discovery5 14:03 / discovery6 14:05 / discovery7 14:30 / discovery8 14:33.
 
 ---
 
@@ -125,7 +132,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 ```
 1차 매수: 목표 수량 50%  (진입 조건 3개 모두 충족 시)
 2차 매수: 목표 수량 30%  (평단 -1~-2% 눌림 + SMA20 위 + 1일 경과)
-3차 매수: 목목 수량 20%  (강한 지지 확인 시만)
+3차 매수: 목표 수량 20%  (강한 지지 확인 시만)
 ```
 
 **핵심 원칙: 하드스탑 기준 = 항상 현재 평단 (분할 후 재계산)**
@@ -208,7 +215,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ---
 
-## 8-1. 완료된 이슈 (v2.4~v2.5, 2026-04-21)
+## 8-1. 완료된 이슈 (v2.4~v2.7, 2026-04-21)
 
 ### ✅ 이슈 2 — stock_discovery 스크리닝 조건 완화 (완료)
 - `_MIN_VOL_RATIO` 0.8 → 0.5 완화
@@ -234,10 +241,39 @@ inject_to_env()  # 반드시 첫 줄에 호출
 - Stage 11 Opus 검증 3건 수정: `_fetch_current_price()` 정리, round2 없을 때 경고 처리
 - 설계 문서: `docs/09_round34/`
 
+### ✅ Phase 1.2 — intraday_discovery round 5~8 (완료)
+- `--round 5~8` 추가: 오후장 발굴/재발굴 사이클 분리
+- round6 로그 기록 시 `session="afternoon"` 저장
+- round8은 round6 상위 5개 종목 현재가 추적 + `⭐재확인` 표시
+- launchd plist 추가: `com.aigeenya.stockreport.discovery5.plist` ~ `discovery8.plist`
+- 설계 문서: `docs/10_round5678/`
+
 ### ✅ 핫픽스 — intraday_report.py 갭 방향 버그 수정
 - **버그:** `prev_close = cur_price` (09:10 현재가를 전일종가로 착각 → 갭 방향 오계산)
 - **수정:** `get_daily_chart()`로 실제 전일 종가(`stck_clpr`) 조회, fallback은 분봉 첫 시가
 - **영향:** GS건설 등 상승출발 종목이 "하락출발"로 잘못 표시되던 문제 해결
+
+---
+
+## 8-2. v2.7.2 — round 5~8 plist 원복 (2026-04-21)
+
+### ✅ 결정: 15:03 임시변경 테스트 취소, 14:03 원계획 유지
+
+**경위:**
+- v2.7.1에서 round 5~8 (14:03~14:33) plist 4개를 15:03~15:33으로 임시 변경 도중 세션 종료
+- 재개 시 확인 결과: discovery5/6은 15:03/15:05로 변경된 상태, discovery7/8은 14:30/14:33 그대로
+- 형진님 결정: 시간이 지나서 테스트 의미 없음 → 전부 14시대로 원복
+
+**원복 완료 (PlistBuddy `:StartCalendarInterval:0:Hour` 사용):**
+- discovery5 → 14:03 ✅
+- discovery6 → 14:05 ✅
+- discovery7 → 14:30 ✅ (변경 없음)
+- discovery8 → 14:33 ✅ (변경 없음)
+- launchctl unload/load 재등록 완료
+
+**잔존 이슈 (낮은 우선순위):**
+- `launchctl list | grep discovery` 결과에 번호 없는 `com.aigeenya.stockreport.discovery` 항목이 하나 떠 있음
+- 옛날 등록물 잔재로 추정 → 정리 시점 추후 결정
 
 ---
 
@@ -247,6 +283,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 |-------|------|------|
 | **Phase 1** | intraday_discovery 고도화 | ✅ 완료 |
 | **Phase 1.1** | intraday_discovery round 3/4 | ✅ 완료 |
+| **Phase 1.2** | intraday_discovery round 5~8 | ✅ 완료 |
 | **Phase 1.5** | 모닝 리포트에 전날 발굴 성과 요약 추가 | 🔜 데이터 쌓인 후 |
 | **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 다음 |
 | **Phase 3** | 보유 포지션 평단 관리 자동화 | 🔜 Phase 2 후 |
@@ -254,11 +291,12 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ---
 
-## 9. 다음 세션에서 할 작업
+## 10. 다음 세션에서 할 작업
 
 ### 🔴 Stage 12 QA — Phase 1 실제 운영 검증
 - [ ] 내일 장 시작(09:03~09:05) round1 → round2 실행 후 `data/discovery_log.json` 생성 확인
 - [ ] 09:30~09:33 round3 → round4 실행 후 오전 추적 섹션/`⭐재확인` 표시 확인
+- [ ] 14:03~14:33 round5 → round8 실행 후 오후 추적 섹션/`⭐재확인` 표시 확인
 - [ ] 20:30 closing_report 실행 후 `close_price`, `return_pct` 업데이트 확인
 - [ ] 텔레그램 메시지에 "추가 관심 후보" 섹션 정상 표시 확인
 
@@ -270,7 +308,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ---
 
-## 10. 주요 명령어 모음
+## 11. 주요 명령어 모음
 
 ```bash
 cd /Users/geenya/projects/AI_Projects/stockpilot
@@ -282,6 +320,10 @@ venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 3 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 4 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 5 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 6 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 7 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 8 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --debug
 
 # 현재가 즉시 조회
@@ -303,7 +345,7 @@ aigit_upload
 
 ---
 
-## 11. 전체 작업 히스토리 (누적)
+## 12. 전체 작업 히스토리 (누적)
 
 1. 장마감 시간 변경: 16:00 → 20:30
 2. watchlist 자동 동기화: KIS HTS 관심종목 API 연동
@@ -322,31 +364,22 @@ aigit_upload
 15. Telegram 봇 안정화 (startup offset, 구분선 렌더링)
 16. scripts/git_upload.sh + aigit_upload alias
 17. **v2.1 장초기 실시간 종목 발굴** (2026-04-19)
-19. **v2.3 텔레그램 명령 개선 + 타점 코멘트** (2026-04-21):
-    - check_price.py 체결강도 실시간 조회 (FHKST01010300 `get_ccnl()`)
-    - `/발굴` 장중/장외 자동 분기 (intraday_discovery ↔ stock_discovery)
-    - `/잔고` 보유종목 수량·평단·손익 상세 표시
-    - `/상태` 종목명·한글 시그널·현재가(실시간)·매수/매도 타점 코멘트
-    - `_build_action_comment()` 상황별 5단계 매수 / 4단계 매도 분기
-18. **v2.2 전략 확정 + 분할매매 설계** (2026-04-20):
-    - intraday_discovery API 필드명 버그 수정 (종목 0개 → 정상 발굴)
-    - 글로벌 지수 yfinance 교체 (S&P500 None 수정, 나스닥 추가)
-    - 모닝리포트 대응포인트 3단계 분석 고도화
-    - 자산증감 이체금액 역산 로직
-    - check_price.py 발굴가 대비 증감 표시
-    - 추세추종 B+C 매매 전략 확정 → strategy_config.json
-    - 분할매매 로직 설계 (5:3:2, 평단 기준 하드스탑, 전량 매도 확정)
+18. **v2.2 전략 확정 + 분할매매 설계** (2026-04-20)
+19. **v2.3 텔레그램 명령 개선 + 타점 코멘트** (2026-04-21)
+20. **v2.4~v2.7 Phase 1.1/1.2 + 핫픽스** (2026-04-21)
+21. **v2.7.1 세션 중단 — plist 15:03 변경 테스트 미완료** (2026-04-21)
+22. **v2.7.2 round 5~8 plist 14:03 원복 완료** (2026-04-21)
 
 ---
 
-*자동 생성 | stockpilot v2.6 — AI 주식 자동화 시스템*
+*자동 생성 | stockpilot v2.7.2 — AI 주식 자동화 시스템*
 
 ---
 
 ## 📋 다음 세션 시작 프롬프트
 
 > 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
-> 마지막 갱신: 2026-04-21 (v2.6)
+> 마지막 갱신: 2026-04-21 (v2.7.2)
 
 ```
 stockpilot 프로젝트 이어서 진행해줘.
@@ -354,25 +387,23 @@ HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
 경로: /Users/geenya/projects/AI_Projects/stockpilot/
 
 현재 상태 요약:
-- v2.6 완료 (2026-04-21)
-- [Phase 1.1 완료] intraday_discovery round 3/4 추가 (Stage 11 검증 통과)
-  - round 3 (09:30) 수집, round 4 (09:33) 재교집합 분석 + 오전 추적 + ⭐재확인 태그
-  - launchd plist 등록: discovery3, discovery4
-  - 설계 문서: docs/09_round34/
-- [핫픽스 완료] intraday_report.py 갭 방향 버그 수정
-  - prev_close = cur_price → get_daily_chart()로 실제 전일종가 조회
+- v2.7.2 (2026-04-21) — round 5~8 plist 14:03 원복 완료
+- Phase 1.2 완료: intraday_discovery round 5~8 추가 (Stage 11 검증 통과)
+- 핫픽스 완료: intraday_report.py 갭 방향 버그 수정
+- 운영 스케줄: discovery5 14:03 / discovery6 14:05 / discovery7 14:30 / discovery8 14:33
 
 다음 할 작업:
-1. [Stage 12 QA] Phase 1 + Phase 1.1 실제 운영 검증
-   - 장 시작(09:03~09:05) round1→round2 후 discovery_log.json 확인
-   - 09:30~09:33 round3→round4 후 오전 추적 섹션 / ⭐재확인 표시 확인
-   - 20:30 closing_report 후 close_price, return_pct 업데이트 확인
-2. [Phase 2] 텔레그램 /매수 /매도 명령 구현 (Stage 1 브레인스토밍부터 시작)
+1. [Stage 12 QA] Phase 1~1.2 실제 운영 검증 (내일장 09:03~14:33 round 전체)
+   - data/discovery_log.json 자동 생성/업데이트 확인
+   - 텔레그램 메시지 ⭐재확인 / 추가 관심 후보 표시 확인
+2. [Phase 2 준비] 텔레그램 /매수 /매도 명령 구현
+   - strategy_config.json에 position.split_entry 구조 추가
+   - 별도 계좌 분리 (Keychain에 KIS_TRADING_ACCOUNT_NO 추가)
 
 참고 사항:
 - 새 기능 개발 시 반드시 WORKFLOW.md Stage 1~7 순서 준수
-- Stage 1은 형진님과 대화로 시작, Stage 4 승인 후 Stage 5 진입
 - 수정 후 반드시 venv/bin/python3 -m py_compile 문법 검사
+- 터미널 명령 블록 맨 위에 항상 cd /Users/geenya/projects/AI_Projects/stockpilot 포함
 
 어디서부터 시작할까?
 ```

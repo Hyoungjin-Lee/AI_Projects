@@ -57,6 +57,22 @@ inject_to_env()   # 반드시 첫 줄에 호출
 
 ---
 
+## 3-1. 터미널 명령어 출력 규칙
+
+사용자에게 터미널 명령어 블록을 제시할 때는 **항상 맨 위에 프로젝트 경로 이동 명령을 포함**한다.
+
+```bash
+cd /Users/geenya/projects/AI_Projects/stockpilot
+
+# 이후 명령들...
+```
+
+- 단일 명령이라도 경로 이동을 함께 표시한다.
+- 여러 개의 bash 코드블록을 제시하는 경우에도 각 블록 맨 위에 `cd /Users/geenya/projects/AI_Projects/stockpilot` 포함.
+- 형진님이 복사-붙여넣기로 바로 실행할 수 있도록 하는 것이 목적.
+
+---
+
 ## 4. 스크립트 실행
 
 ```bash
@@ -69,6 +85,10 @@ venv/bin/python3 morning_report/intraday_discovery.py --round 1 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 2 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 3 --dry-run
 venv/bin/python3 morning_report/intraday_discovery.py --round 4 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 5 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 6 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 7 --dry-run
+venv/bin/python3 morning_report/intraday_discovery.py --round 8 --dry-run
 
 # Keychain 상태 확인 / 재설정
 venv/bin/python3 morning_report/keychain_manager.py
@@ -113,6 +133,10 @@ aigit_upload
 | 09:30 | `intraday_discovery.py --round 3` |
 | 09:33 | `intraday_discovery.py --round 4` |
 | 09:10 | `intraday_report.py` |
+| 14:03 | `intraday_discovery.py --round 5` |
+| 14:05 | `intraday_discovery.py --round 6` |
+| 14:30 | `intraday_discovery.py --round 7` |
+| 14:33 | `intraday_discovery.py --round 8` |
 | 20:30 | `closing_report.py` |
 | 23:30 | `stock_discovery.py` (월~토) |
 | 상시  | `telegram_bot.py` (봇 데몬) |
