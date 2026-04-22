@@ -39,7 +39,10 @@ _VOLUME_PATH = "/uapi/domestic-stock/v1/quotations/volume-rank"
 _POWER_PATH = "/uapi/domestic-stock/v1/ranking/volume-power"
 _FLUCT_PATH = "/uapi/domestic-stock/v1/ranking/fluctuation"
 _DISPARITY_PATH = "/uapi/domestic-stock/v1/ranking/disparity"
-_HTS_PATH = "/uapi/domestic-stock/v1/quotations/capture-uplmt"
+# [v2.7.3 핫픽스] 아래 엔드포인트/TR은 KIS API에 존재하지 않아 항상 404.
+# 복구 시 후보 1 (의미 정합): /uapi/domestic-stock/v1/ranking/top-interest-stock (TR: FHPST01800000)
+# 복구 시 후보 2 (단순):       /uapi/domestic-stock/v1/ranking/hts-top-view     (TR: HHMCM000100C0)
+_HTS_PATH = "/uapi/domestic-stock/v1/quotations/capture-uplmt"  # DEPRECATED — _fetch_hts_rank 참조
 
 _MEDALS = ["🥇", "🥈", "🥉"]
 
@@ -63,23 +66,23 @@ def run(round_no: int, dry_run: bool = False, debug: bool = False) -> int:
     state = StateManager()
 
     if round_no == 1:
-        return _run_round1(client, state)
+        return _run_round1(client, state, dry_run=dry_run)
     if round_no == 2:
         return _run_round2(client, state, dry_run=dry_run, debug=debug)
     if round_no == 3:
-        return _run_round3(client, state)
+        return _run_round3(client, state, dry_run=dry_run)
     if round_no == 4:
         return _run_round4(client, state, dry_run=dry_run, debug=debug)
     if round_no == 5:
-        return _run_round5(client, state)
+        return _run_round5(client, state, dry_run=dry_run)
     if round_no == 6:
         return _run_round6(client, state, dry_run=dry_run, debug=debug)
     if round_no == 7:
-        return _run_round7(client, state)
+        return _run_round7(client, state, dry_run=dry_run)
     return _run_round8(client, state, dry_run=dry_run, debug=debug)
 
 
-def _run_round1(client, state: StateManager) -> int:
+def _run_round1(client, state: StateManager, dry_run: bool = False) -> int:
     volume_rows = _fetch_volume_rank(client)
     power_rows = _fetch_power_rank(client)
     fluct_rows = _fetch_fluctuation_rank(client)
@@ -93,6 +96,15 @@ def _run_round1(client, state: StateManager) -> int:
         "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
     }
 
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵 (운영 데이터 오염 방지)
+    if dry_run:
+        print(
+            f"[dry-run] round1 state 저장 스킵 "
+            f"(거래량 {len(round1['vol'])} / 체결강도 {len(round1['pow'])} / 등락률 {len(round1['flc'])})",
+            file=sys.stderr,
+        )
+        return 0
+
     state.update("intraday_discovery", {"round1": round1}, caller="intraday_discovery")
     print(
         f"[완료] round1 저장 완료 "
@@ -102,7 +114,7 @@ def _run_round1(client, state: StateManager) -> int:
     return 0
 
 
-def _run_round3(client, state: StateManager) -> int:
+def _run_round3(client, state: StateManager, dry_run: bool = False) -> int:
     volume_rows = _fetch_volume_rank(client)
     power_rows = _fetch_power_rank(client)
     fluct_rows = _fetch_fluctuation_rank(client)
@@ -116,6 +128,15 @@ def _run_round3(client, state: StateManager) -> int:
         "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
     }
 
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵
+    if dry_run:
+        print(
+            f"[dry-run] round3 state 저장 스킵 "
+            f"(거래량 {len(round3['vol'])} / 체결강도 {len(round3['pow'])} / 등락률 {len(round3['flc'])})",
+            file=sys.stderr,
+        )
+        return 0
+
     state.update("intraday_discovery", {"round3": round3}, caller="intraday_discovery")
     print(
         f"[완료] round3 저장 완료 "
@@ -125,7 +146,7 @@ def _run_round3(client, state: StateManager) -> int:
     return 0
 
 
-def _run_round5(client, state: StateManager) -> int:
+def _run_round5(client, state: StateManager, dry_run: bool = False) -> int:
     volume_rows = _fetch_volume_rank(client)
     power_rows = _fetch_power_rank(client)
     fluct_rows = _fetch_fluctuation_rank(client)
@@ -139,6 +160,15 @@ def _run_round5(client, state: StateManager) -> int:
         "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
     }
 
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵
+    if dry_run:
+        print(
+            f"[dry-run] round5 state 저장 스킵 "
+            f"(거래량 {len(round5['vol'])} / 체결강도 {len(round5['pow'])} / 등락률 {len(round5['flc'])})",
+            file=sys.stderr,
+        )
+        return 0
+
     state.update("intraday_discovery", {"round5": round5}, caller="intraday_discovery")
     print(
         f"[완료] round5 저장 완료 "
@@ -148,7 +178,7 @@ def _run_round5(client, state: StateManager) -> int:
     return 0
 
 
-def _run_round7(client, state: StateManager) -> int:
+def _run_round7(client, state: StateManager, dry_run: bool = False) -> int:
     volume_rows = _fetch_volume_rank(client)
     power_rows = _fetch_power_rank(client)
     fluct_rows = _fetch_fluctuation_rank(client)
@@ -161,6 +191,15 @@ def _run_round7(client, state: StateManager) -> int:
         "acml_vol": _extract_metric_map(volume_rows, "acml_vol"),
         "names": _extract_name_map(volume_rows, power_rows, fluct_rows),
     }
+
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵
+    if dry_run:
+        print(
+            f"[dry-run] round7 state 저장 스킵 "
+            f"(거래량 {len(round7['vol'])} / 체결강도 {len(round7['pow'])} / 등락률 {len(round7['flc'])})",
+            file=sys.stderr,
+        )
+        return 0
 
     state.update("intraday_discovery", {"round7": round7}, caller="intraday_discovery")
     print(
@@ -286,9 +325,13 @@ def _run_round2(client, state: StateManager, dry_run: bool = False, debug: bool 
         ],
         "top_picks": [item["code"] for item in top_picks],
     }
-    state.update("intraday_discovery", {"round2": round2}, caller="intraday_discovery")
 
-    _save_discovery_log(scored, volume_rows)
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 및 discovery_log 스킵
+    if not dry_run:
+        state.update("intraday_discovery", {"round2": round2}, caller="intraday_discovery")
+        _save_discovery_log(scored, volume_rows)
+    else:
+        print(f"[dry-run] round2 state/discovery_log 저장 스킵 ({len(scored)}종목)", file=sys.stderr)
 
     message = _build_message(round2["time"], top_picks, len(scored), all_scored=scored)
     if dry_run:
@@ -437,7 +480,12 @@ def _run_round4(client, state: StateManager, dry_run: bool = False, debug: bool 
         "top_picks": [item["code"] for item in top_picks],
         "tracking": tracking,
     }
-    state.update("intraday_discovery", {"round4": round4}, caller="intraday_discovery")
+
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵
+    if not dry_run:
+        state.update("intraday_discovery", {"round4": round4}, caller="intraday_discovery")
+    else:
+        print(f"[dry-run] round4 state 저장 스킵 ({len(scored)}종목)", file=sys.stderr)
 
     message = _build_message_round4(round4["time"], top_picks, len(scored), tracking=tracking, all_scored=scored)
     if dry_run:
@@ -575,9 +623,13 @@ def _run_round6(client, state: StateManager, dry_run: bool = False, debug: bool 
         ],
         "top_picks": [item["code"] for item in top_picks],
     }
-    state.update("intraday_discovery", {"round6": round6}, caller="intraday_discovery")
 
-    _save_discovery_log(scored, volume_rows, session="afternoon")
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 및 discovery_log 스킵
+    if not dry_run:
+        state.update("intraday_discovery", {"round6": round6}, caller="intraday_discovery")
+        _save_discovery_log(scored, volume_rows, session="afternoon")
+    else:
+        print(f"[dry-run] round6 state/discovery_log 저장 스킵 ({len(scored)}종목)", file=sys.stderr)
 
     message = _build_message_afternoon(round6["time"], top_picks, len(scored), all_scored=scored)
     if dry_run:
@@ -726,7 +778,12 @@ def _run_round8(client, state: StateManager, dry_run: bool = False, debug: bool 
         "top_picks": [item["code"] for item in top_picks],
         "tracking": tracking,
     }
-    state.update("intraday_discovery", {"round8": round8}, caller="intraday_discovery")
+
+    # [v2.7.3 핫픽스] dry-run 시 state 저장 스킵
+    if not dry_run:
+        state.update("intraday_discovery", {"round8": round8}, caller="intraday_discovery")
+    else:
+        print(f"[dry-run] round8 state 저장 스킵 ({len(scored)}종목)", file=sys.stderr)
 
     message = _build_message_round8(round8["time"], top_picks, len(scored), tracking=tracking, all_scored=scored)
     if dry_run:
@@ -890,12 +947,12 @@ def _fetch_disparity_rank(client) -> list[dict[str, Any]]:
 
 
 def _fetch_hts_rank(client) -> list[dict[str, Any]]:
-    try:
-        response = client._get(_HTS_PATH, "FHPST01830000", {})
-        return _normalize_output(response)[:_TOP_N]
-    except Exception as exc:
-        print(f"[경고] HTS조회상위 API 실패, 관심도 가산점 생략: {exc}", file=sys.stderr)
-        return []
+    # [v2.7.3 핫픽스] capture-uplmt/FHPST01830000 은 KIS API에 존재하지 않아 항상 404.
+    # 향후 [0180] 관심종목등록상위 API (FHPST01800000,
+    # /uapi/domestic-stock/v1/ranking/top-interest-stock) 로 마이그레이션 예정.
+    # 그 전까지는 온라인관심 가산점을 비활성화 (빈 리스트 반환).
+    _ = client  # 인자 보존 (향후 복구 시 사용 예정)
+    return []
 
 
 def _fetch_rank(

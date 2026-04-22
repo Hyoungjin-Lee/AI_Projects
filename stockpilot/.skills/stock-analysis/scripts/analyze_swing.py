@@ -201,6 +201,8 @@ def analyze(code: str, days: int = 120) -> dict:
         "perspective": "swing",
         "verdict": verdict,
         "confidence": confidence,
+        "current_price": c,           # [v2.7.3 핫픽스] 일봉 마지막 종가 (정규장 기준)
+                                      # TODO: NXT 편입 종목 야간 종가 병표기 (별도 작업)
         "key_signals": signals,
         "support_levels": sr["support"],
         "resistance_levels": sr["resistance"],

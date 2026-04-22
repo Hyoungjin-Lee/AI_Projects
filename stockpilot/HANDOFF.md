@@ -1,6 +1,6 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-21 (v2.7.2 — round 5~8 plist 14:03 원복 완료)
+> 최종 업데이트: 2026-04-22 (v2.7.3 — 핫픽스 3종 완료, Stage 12 QA 진행 중)
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
 
 ---
@@ -273,7 +273,57 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 **잔존 이슈 (낮은 우선순위):**
 - `launchctl list | grep discovery` 결과에 번호 없는 `com.aigeenya.stockreport.discovery` 항목이 하나 떠 있음
-- 옛날 등록물 잔재로 추정 → 정리 시점 추후 결정
+- **→ 2026-04-22 재판정:** 오판이었음. `com.aigeenya.stockreport.discovery` 는 23:30 `stock_discovery.py` 의 정당한 plist.
+  네이밍이 `discovery5~8`(intraday_discovery) 과 비슷해 혼동 발생. 삭제하지 않음. 네이밍 리네이밍은 백로그 (우선순위 낮음).
+
+---
+
+## 8-3. v2.7.3 — 핫픽스 3종 + Stage 12 QA (2026-04-22)
+
+### ✅ 핫픽스 #1 — HTS capture-uplmt 404 비활성화
+
+- **증상:** `intraday_discovery round 2/4/6/8` 실행 시 `[경고] API 호출 실패 (404): /uapi/domestic-stock/v1/quotations/capture-uplmt` 반복 출력
+- **원인:** `_HTS_PATH = "/uapi/domestic-stock/v1/quotations/capture-uplmt"` (TR: `FHPST01830000`) 이 KIS API 문서에 **존재하지 않는 엔드포인트**
+- **검증:** `docs/api/한국투자증권_오픈API_전체문서_20260417_030007.xlsx` 전수 조회 → 매칭 0건
+- **조치:** `_fetch_hts_rank()` 함수 본문을 `return []` 로 비활성화, 시그니처/호출부는 보존 (향후 복구 대비)
+- **복구 후보 API:**
+  - 후보 1 (의미 정합): `/uapi/domestic-stock/v1/ranking/top-interest-stock` (TR: `FHPST01800000`) — 관심종목등록상위
+  - 후보 2 (단순): `/uapi/domestic-stock/v1/ranking/hts-top-view` (TR: `HHMCM000100C0`) — HTS 조회상위
+- **영향:** 온라인관심 가산점(`hts_rank`) 기능이 비활성화됨. 이미 5개 지표(거래량/체결강도/등락률/이격도/교집합) 로도 점수 산정 충분하므로 발굴 품질 저하 없음
+- **운영 검증:** 04-22 round 3/4 실행 시 404 경고 **사라짐 확인 ✅**
+
+### ✅ 핫픽스 #2 — stock_discovery "0원" 표시 버그
+
+- **증상:** 23:30 stock_discovery 텔레그램 메시지에 `📗 삼성E&A(028050) 0원 BUY (67%)` 형태로 현재가가 "0원" 표시
+- **원인:** `.skills/stock-analysis/scripts/analyze_swing.py` 의 반환 dict 에 `current_price` 키가 누락 → `stock_discovery.py` 261행 `analysis.get("current_price", 0)` 가 기본값 0 반환
+- **조치:** `analyze_swing.py` `analyze()` 함수의 반환 dict 에 `"current_price": c` 추가 (c = 일봉 마지막 종가, 정규장 기준)
+- **NXT 야간 종가 병표기 논의:** 형진님 선택 = 옵션 3 (정규장 + NXT 병표기). 현재는 정규장 종가만 표시 (핫픽스 #2로 확보), NXT 종가 병표기는 별도 기능으로 백로그 처리 (Task #11)
+- **운영 검증:** 오늘 밤(04-22) 23:30 stock_discovery 실행에서 확인 예정
+
+### ✅ 핫픽스 #3 — dry-run 데이터 오염 방지
+
+- **증상:** 04-21 `discovery_log.json` 에 `disc_time: 10:13` (정식 스케줄 09:05 아님) 오염 데이터 1건. 04-22 QA 중에도 `--round 2 --dry-run` 테스트 실행 시 운영 state 및 discovery_log 변경됨
+- **원인:** `intraday_discovery.py` 의 dry-run 분기가 **텔레그램 전송만 스킵**, `state.update()` / `_save_discovery_log()` 는 그대로 실행됨
+- **조치:** 8개 round 전체에 dry-run 가드 적용
+  - 홀수 round (1,3,5,7): 함수 시그니처에 `dry_run: bool = False` 추가 + `state.update()` 가드
+  - 짝수 round 2,6: `state.update()` + `_save_discovery_log()` 둘 다 가드
+  - 짝수 round 4,8: `state.update()` 가드 (discovery_log 저장 없음)
+  - `run()` dispatcher 에서 모든 round 에 `dry_run` 전파
+- **로그 메시지:** dry-run 실행 시 stderr 에 `[dry-run] roundN state 저장 스킵 (N종목)` 출력
+- **검증 결과 (04-22):**
+  - `BEFORE: 09:03` → 10:02 `--round 1 --dry-run` → `AFTER: 09:03` 완전 동일 ✅
+  - round 2 dry-run 실행 후 discovery_log 건수 변화 없음 ✅
+- **오염 데이터 청소:** 04-22 09:28 테스트로 추가된 1건은 로컬에서 제거 완료 (20:30 closing_report 통계 오염 방지)
+
+### 🔴 Stage 12 QA 진행 상황
+
+| 검증 항목 | 상태 |
+|----------|------|
+| 09:03~09:05 round 1~2 자동 실행 + discovery_log 생성 | ✅ 운영 확인 |
+| 09:30~09:33 round 3~4 자동 실행 + ⭐재확인 표시 | ✅ 운영 확인 |
+| 14:03~14:33 round 5~8 자동 실행 + 오후 추적 | 🔜 14:03 대기 (04-22 예정) |
+| 20:30 closing_report 실행 + close_price/return_pct 업데이트 | 🔜 20:30 대기 |
+| 23:30 stock_discovery 실행 + 핫픽스 #2 검증 (0원 → 실제 종가) | 🔜 오늘 밤 |
 
 ---
 
@@ -369,17 +419,18 @@ aigit_upload
 20. **v2.4~v2.7 Phase 1.1/1.2 + 핫픽스** (2026-04-21)
 21. **v2.7.1 세션 중단 — plist 15:03 변경 테스트 미완료** (2026-04-21)
 22. **v2.7.2 round 5~8 plist 14:03 원복 완료** (2026-04-21)
+23. **v2.7.3 핫픽스 3종 + Stage 12 QA 진입** (2026-04-22)
 
 ---
 
-*자동 생성 | stockpilot v2.7.2 — AI 주식 자동화 시스템*
+*자동 생성 | stockpilot v2.7.3 — AI 주식 자동화 시스템*
 
 ---
 
 ## 📋 다음 세션 시작 프롬프트
 
 > 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
-> 마지막 갱신: 2026-04-21 (v2.7.2)
+> 마지막 갱신: 2026-04-22 (v2.7.3)
 
 ```
 stockpilot 프로젝트 이어서 진행해줘.
@@ -387,23 +438,33 @@ HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
 경로: /Users/geenya/projects/AI_Projects/stockpilot/
 
 현재 상태 요약:
-- v2.7.2 (2026-04-21) — round 5~8 plist 14:03 원복 완료
-- Phase 1.2 완료: intraday_discovery round 5~8 추가 (Stage 11 검증 통과)
-- 핫픽스 완료: intraday_report.py 갭 방향 버그 수정
-- 운영 스케줄: discovery5 14:03 / discovery6 14:05 / discovery7 14:30 / discovery8 14:33
+- v2.7.3 (2026-04-22) — 핫픽스 3종 완료 + Stage 12 QA 진행 중
+  1) HTS capture-uplmt 404 → _fetch_hts_rank() 비활성화
+  2) stock_discovery "0원" 표시 → analyze_swing.py current_price 키 추가
+  3) dry-run 데이터 오염 → 8개 round 전체 state.update/_save_discovery_log 가드
+- Phase 1~1.2 전부 완료 (운영 스케줄 정상)
+- launchctl `com.aigeenya.stockreport.discovery` 는 23:30 stock_discovery 의 정당한 plist (삭제 금지)
 
 다음 할 작업:
-1. [Stage 12 QA] Phase 1~1.2 실제 운영 검증 (내일장 09:03~14:33 round 전체)
-   - data/discovery_log.json 자동 생성/업데이트 확인
-   - 텔레그램 메시지 ⭐재확인 / 추가 관심 후보 표시 확인
+1. [Stage 12 QA 마무리] 남은 검증 포인트 확인
+   - 14:03~14:33 round 5~8 자동 실행 + 오후 추적 (최근 실행 결과 점검)
+   - 20:30 closing_report 실행 + close_price/return_pct 업데이트 확인
+   - 23:30 stock_discovery 실행 + 핫픽스 #2 검증 (0원 → 실제 종가 표시)
 2. [Phase 2 준비] 텔레그램 /매수 /매도 명령 구현
    - strategy_config.json에 position.split_entry 구조 추가
    - 별도 계좌 분리 (Keychain에 KIS_TRADING_ACCOUNT_NO 추가)
+   - /매수 종목코드 수량 / /매도 종목코드 전량 청산
+
+백로그 (우선순위 낮음):
+- NXT 야간 종가 병표기 기능 (정규장 + NXT hybrid)
+- launchctl 네이밍 리네이밍 검토 (discovery vs discovery5~8 혼동 방지)
+- HTS 온라인관심 가산점 복구 (top-interest-stock 또는 hts-top-view API로 마이그레이션)
 
 참고 사항:
 - 새 기능 개발 시 반드시 WORKFLOW.md Stage 1~7 순서 준수
 - 수정 후 반드시 venv/bin/python3 -m py_compile 문법 검사
 - 터미널 명령 블록 맨 위에 항상 cd /Users/geenya/projects/AI_Projects/stockpilot 포함
+- dry-run 은 이제 진짜 dry-run (운영 데이터 절대 오염 안 됨)
 
 어디서부터 시작할까?
 ```
