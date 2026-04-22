@@ -121,5 +121,19 @@
     "close_price": 51700,
     "return_pct": 1.77,
     "updated_at": "2026-04-21T20:30:08"
+  },
+  {
+    "date": "2026-04-22",
+    "session": "morning",
+    "disc_time": "09:05",
+    "code": "064350",
+    "name": "현대로템",
+    "disc_price": 233000,
+    "score": 4,
+    "pow_2": 224.9,
+    "flc_2": 5.42,
+    "close_price": null,
+    "return_pct": null,
+    "updated_at": null
   }
 ]
