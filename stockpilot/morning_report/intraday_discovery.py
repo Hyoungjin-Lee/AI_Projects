@@ -33,8 +33,8 @@ load_dotenv(_ROOT / ".env")
 from keychain_manager import inject_to_env
 inject_to_env()
 from state_manager import StateManager
+from market_calendar import is_trading_day, holiday_name  # 휴장일(주말+공휴일) 판정 공통 유틸
 
-_WEEKDAYS = {0, 1, 2, 3, 4}
 _TOP_N = 50
 _HTS_TOP_N = 10
 # 이격도 과열 컷 — SMA20 대비 +30% 초과 종목 제외 (v2.8.0 완화: 120 → 130)
@@ -160,8 +160,9 @@ def run(round_no: int, dry_run: bool = False, debug: bool = False) -> int:
     now_str = now.strftime("%H:%M")
     print(f"[{now_str}] 장초기 종목 발굴 시작 (round {round_no})...", file=sys.stderr)
 
-    if date.today().weekday() not in _WEEKDAYS:
-        print("[발굴] 오늘은 주말입니다. 종료.", file=sys.stderr)
+    if not is_trading_day():
+        reason = holiday_name() or ("토요일" if date.today().weekday() == 5 else "일요일")
+        print(f"[발굴] 오늘은 휴장일({reason}) — 종료.", file=sys.stderr)
         return 0
 
     try:

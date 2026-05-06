@@ -323,5 +323,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="KIS HTS 관심종목 → watchlist.json 동기화")
     parser.add_argument("--dry-run", action="store_true", help="파일 저장 없이 결과만 출력")
     parser.add_argument("--show",    action="store_true", help="현재 watchlist.json 내용 출력")
+    parser.add_argument("--force",   action="store_true", help="휴장일에도 강제 실행")
     args = parser.parse_args()
+
+    # 휴장일(주말+한국 공휴일) 가드 — --show / --force 는 우회
+    if not args.show and not args.force:
+        from market_calendar import exit_if_holiday
+        exit_if_holiday("watchlist_sync")
+
     run(dry_run=args.dry_run, show=args.show)

@@ -1,9 +1,62 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-05-06 저녁 (v2.8.6 — 휴장 보호 + plist 운영 시각 핫픽스)
-> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.6 상태 복원
-> 다음 평일 (2026-05-07 목) 14:03/14:05 정상 실행 검증 우선
+> 최종 업데이트: 2026-05-06 저녁 (v2.8.7 — 휴장일 가드 통일)
+> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.7 상태 복원
+> 다음 평일 (2026-05-07 목) 운영 검증 + 5/9(토)/5/10(일) 메시지 미발송 확인 우선
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
+
+---
+
+## 🆕 2026-05-06 (저녁) — v2.8.7: 휴장일(주말+한국 공휴일) 가드 통일
+
+### 배경
+- 5/5(화) 어린이날 운영 시 KIS API가 휴장 데이터를 정상 거래일처럼 반환 → 발굴 + 발송 진행됨 → 모닝 리포트 통계 오염
+- 사용자 요구: 토요일/일요일/한국 공휴일에 모든 자동 텔레그램 메시지 미발송
+
+### 신규 모듈
+- **`morning_report/market_calendar.py`** — 한국 거래소 영업일 판정 공통 유틸
+  - `is_trading_day(d=None) -> bool` — 토/일/한국 공휴일이면 False
+  - `holiday_name(d=None) -> str | None` — 공휴일 이름 반환
+  - `previous_trading_day(d=None) -> date` — 이전 영업일 (휴장 스킵)
+  - `exit_if_holiday(script_name)` — 휴장이면 sys.exit(0) (entry point용)
+
+### 의존성
+- **`holidays` 라이브러리** — venv에 설치 (`venv/bin/python3 -m pip install holidays`)
+- 미설치 시 weekday만으로 판정 (안전성 ↓ — 평일 공휴일 누락)
+- requirements.txt 미관리 프로젝트 → 새 환경 구축 시 수동 설치 필요
+
+### 7개 스크립트 가드 통일
+| 스크립트 | 변경 |
+|---|---|
+| `morning_report.py` | 기존 `is_trading_day`/`_WEEKDAYS` 제거 → market_calendar import. `_previous_trading_day`도 위임 (대체공휴일 인식) |
+| `intraday_discovery.py` | `_WEEKDAYS` 제거. line 163 가드 통일 + 공휴일 이름 표시 |
+| `closing_report.py` | `_WEEKDAYS` 제거. line 55 가드 통일 |
+| `intraday_report.py` | `_WEEKDAYS` 제거. line 43 가드 통일 |
+| `stock_discovery.py` | "일요일만 건너뜀" → "휴장일 건너뜀". `force` 우회 보존 |
+| `pattern_lifecycle.py` | entry point에 `exit_if_holiday()` 추가 (`--force`/`--dry-run` 우회) |
+| `watchlist_sync.py` | entry point에 `exit_if_holiday()` 추가 (`--show`/`--force` 우회) |
+
+### 검증 (8개 시나리오 100% 통과)
+- 5/5 어린이날 (화) → False ✅
+- 5/6 (수) → True ✅
+- 5/9 (토) → False ✅
+- 5/10 (일) → False ✅
+- 5/11 (월) → True ✅
+- 5/25 부처님 대체 (월) → False ✅
+- 6/3 지방선거일 (수) → False ✅
+- 12/25 성탄절 (금) → False ✅
+- `previous_trading_day(2026-05-26)` → `2026-05-22` (5/25 대체공휴일 스킵) ✅
+
+### 우회 옵션 (수동 호출/테스트)
+- `stock_discovery.run(force=True)` — orchestrator 텔레그램 `/발굴` 명령
+- `pattern_lifecycle.py --force` 또는 `--dry-run`
+- `watchlist_sync.py --show` 또는 `--force`
+
+### 다음 검증 일정
+- **2026-05-07 (목, 영업일)** — 모든 스크립트 정상 실행 (모닝/발굴/클로징 텔레그램 도착)
+- **2026-05-09 (토)** — 메시지 미발송 확인 (특히 23:30 stock_discovery)
+- **2026-05-10 (일)** — 메시지 미발송 확인
+- **2026-05-25 (월, 부처님 대체)** — 평일이지만 미발송 확인 (다음 평일 공휴일)
 
 ---
 

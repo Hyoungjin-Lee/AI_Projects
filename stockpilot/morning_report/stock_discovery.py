@@ -36,13 +36,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
 from state_manager import StateManager
+from market_calendar import is_trading_day, holiday_name  # 휴장일(주말+공휴일) 판정 공통 유틸
 
 _WATCHLIST_FILE  = _ROOT / "data" / "watchlist.json"
 _MIN_MKTCAP_100M = 1000   # 시총 1000억 이상 (단위: 억원)
 _MIN_VOL_RATIO   = 0.5    # 거래량이 평균 대비 50% 이상 (야간 실행 특성 반영, 0.8→0.5 완화)
 _MAX_PER_SECTOR  = 2      # 섹터당 최대 추천 종목 수
-
-_WEEKDAYS = {0, 1, 2, 3, 4}
 
 
 def run(dry_run: bool = False, force: bool = False):
@@ -52,11 +51,12 @@ def run(dry_run: bool = False, force: bool = False):
 
     print(f"[{now_str}] 종목 발굴 시작...", file=sys.stderr)
 
-    # 주말에는 실행하지 않음 (금요일 밤은 토요일이지만 허용)
-    # force=True 시 요일 체크 건너뜀 (텔레그램 /발굴 명령 등)
-    today_weekday = date.today().weekday()
-    if today_weekday == 6 and not force:  # 일요일만 건너뜀
-        print("[발굴] 일요일입니다. 종료.", file=sys.stderr)
+    # 휴장일(주말+한국 공휴일)에는 실행하지 않음.
+    # force=True 시 모든 휴장 체크 건너뜀 (텔레그램 /발굴 명령 등 수동 호출).
+    if not is_trading_day() and not force:
+        today_weekday = date.today().weekday()
+        reason = holiday_name() or ("토요일" if today_weekday == 5 else "일요일")
+        print(f"[발굴] 오늘은 휴장일({reason}) — 종료.", file=sys.stderr)
         return
 
     # ── 1. 미국 시장 상황 파악 ─────────────────────────────────────────────────

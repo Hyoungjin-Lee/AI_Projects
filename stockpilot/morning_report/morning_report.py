@@ -32,14 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
 from state_manager import StateManager
-
-# 거래일 여부 체크용 (공휴일은 별도 관리 없이 KIS 응답으로 감지)
-_WEEKDAYS = {0, 1, 2, 3, 4}   # 월~금
-
-
-def is_trading_day() -> bool:
-    """오늘이 평일인지 확인 (공휴일은 KIS API 호출 후 빈 데이터로 감지)."""
-    return date.today().weekday() in _WEEKDAYS
+from market_calendar import is_trading_day, holiday_name, previous_trading_day  # 휴장일(주말+공휴일) 판정 공통 유틸
 
 
 def run(dry_run: bool = False):
@@ -49,9 +42,10 @@ def run(dry_run: bool = False):
 
     print(f"[{now_str}] 모닝 브리핑 시작...", file=sys.stderr)
 
-    # ── 거래일 체크 ───────────────────────────────────────────────────────────
+    # ── 거래일 체크 (주말 + 한국 공휴일) ──────────────────────────────────────
     if not is_trading_day():
-        print("[브리핑] 오늘은 주말입니다. 종료.", file=sys.stderr)
+        reason = holiday_name() or ("토요일" if date.today().weekday() == 5 else "일요일")
+        print(f"[브리핑] 오늘은 휴장일({reason}) — 종료.", file=sys.stderr)
         return
 
     # ── 1. KIS 잔고 조회 ──────────────────────────────────────────────────────
@@ -178,11 +172,8 @@ def run(dry_run: bool = False):
 # ── 보고서 빌더 ───────────────────────────────────────────────────────────────
 
 def _previous_trading_day(today: date) -> date:
-    """이전 거래일 (주말 제외, 공휴일은 KIS 응답으로 감지하지 않음 — 단순 weekday 기준)."""
-    d = today - timedelta(days=1)
-    while d.weekday() >= 5:  # 토(5), 일(6) 스킵
-        d -= timedelta(days=1)
-    return d
+    """이전 거래일 (주말 + 한국 공휴일 모두 스킵 — market_calendar 위임)."""
+    return previous_trading_day(today)
 
 
 def _build_yesterday_discovery_section() -> list[str]:

@@ -362,12 +362,19 @@ def _print_statistics(entries: list[dict[str, Any]]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Track discovery lifecycle outcomes.")
     parser.add_argument("--dry-run", action="store_true", help="Do not write discovery_log.json")
+    parser.add_argument("--force", action="store_true", help="Run even on holidays/weekends")
     parser.add_argument(
         "--log-path",
         default=str(_LOG_FILE),
         help="Path to discovery_log.json",
     )
     args = parser.parse_args()
+
+    # 휴장일(주말+한국 공휴일) 가드 — --force / --dry-run 우회 가능
+    if not args.force and not args.dry_run:
+        from market_calendar import exit_if_holiday  # sys.path는 line 20에서 이미 설정됨
+        exit_if_holiday("pattern_lifecycle")
+
     return update_lifecycle(args.log_path, dry_run=args.dry_run)
 
 

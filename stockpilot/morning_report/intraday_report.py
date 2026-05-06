@@ -29,8 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
 from state_manager import StateManager
-
-_WEEKDAYS = {0, 1, 2, 3, 4}
+from market_calendar import is_trading_day, holiday_name  # 휴장일(주말+공휴일) 판정 공통 유틸
 
 
 def run(dry_run: bool = False):
@@ -40,8 +39,9 @@ def run(dry_run: bool = False):
 
     print(f"[{now_str}] 장초기 브리핑 시작...", file=sys.stderr)
 
-    if date.today().weekday() not in _WEEKDAYS:
-        print("[브리핑] 오늘은 주말입니다. 종료.", file=sys.stderr)
+    if not is_trading_day():
+        reason = holiday_name() or ("토요일" if date.today().weekday() == 5 else "일요일")
+        print(f"[브리핑] 오늘은 휴장일({reason}) — 종료.", file=sys.stderr)
         return
 
     # ── 1. 잔고 조회 ──────────────────────────────────────────────────────────
