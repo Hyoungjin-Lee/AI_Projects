@@ -1,9 +1,54 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-05-06 저녁 (v2.8.7 — 휴장일 가드 통일)
-> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.7 상태 복원
+> 최종 업데이트: 2026-05-06 밤 (v2.8.8 — NXT Stage1 + 5/5 정정 + 단위테스트 + requirements)
+> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.8 상태 복원
 > 다음 평일 (2026-05-07 목) 운영 검증 + 5/9(토)/5/10(일) 메시지 미발송 확인 우선
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
+
+---
+
+## 🆕 2026-05-06 (밤) — v2.8.8: NXT Stage1 + 5/5 데이터 정정 + 단위테스트 + requirements
+
+### 1. NXT 옵션 B Stage 1 (브레인스토밍) 완료
+**문서:** `docs/14_nxt_integration/01_brainstorm.md`
+
+**핵심 발견:** KIS `주식잔고조회`(TTTC8434R) 요청 헤더에 `AFHR_FLPR_YN` 파라미터 존재
+- `N` (기본값) — 정규장 KRX
+- `Y` — 시간외단일가
+- **`X`** — **NXT 정규장 (프리마켓 + 메인 + 애프터마켓 통합)**
+
+**구현 옵션 비교** (Stage 2에서 결정 예정):
+1. `X` 모드 단일 호출 — 1시간, 가장 단순
+2. **`N`+`X` 듀얼 호출 + 차이 표시** — 2~3시간, **권고** (NXT 차이 명시적 표시)
+3. 시간대 분기 — 3~4시간, 복잡
+
+**다음:** 형진님 검토 → 옵션 선택 → Stage 2 진입
+
+### 2. 5/5 어린이날 휴장 데이터 정정
+- `data/discovery_log.json` 5/5 레코드 10건의 `close_price`/`return_pct` 제거 + `holiday_skipped: true` 마커 추가
+- 백업: `data/discovery_log.json.bak.20260506_235855`
+- 효과: 다음 모닝 리포트(5/7)의 "어제 발굴 성과" 섹션이 깔끔하게 표시됨
+
+### 3. market_calendar 단위 테스트 (24/24 PASS)
+- 신규: `tests/test_market_calendar.py`
+- 19개 시나리오 (영업일/주말/공휴일/대체공휴일/연휴) + 5개 previous_trading_day 케이스
+- 실행: `venv/bin/python3 -m pytest tests/test_market_calendar.py -v`
+
+### 4. requirements.txt 신규
+- 누락됐던 핵심 의존성 명시 (holidays, openpyxl 포함)
+- 새 환경 구축 시: `venv/bin/python3 -m pip install -r requirements.txt`
+
+### 5. discovery6 round6 state 미저장 가설 (백로그)
+**관찰:**
+- 5/6 운영 후 state에 round 5/6/9~14 누락 (round 7/8 + 15~26은 정상)
+- 14:05 round6 stderr는 정상: 텔레그램 발송 + `_save_discovery_log` 성공
+- 그러나 `state.update("intraday_discovery", {"round6": ...})`가 반영 안 됨
+
+**가설:**
+- `state_manager.py`의 update가 deep merge가 아닌 shallow replace 가능성
+- 또는 동시 실행 race condition (15:05에 round 26 + round 6 동시 실행 → 한쪽이 다른 쪽 덮어씀)
+
+**우선순위:** 낮음 (5/6 plist 핫픽스로 동시 실행 충돌 해소). 다음 평일 5/7~5/8 운영 결과로 재현 여부 확인.
 
 ---
 
