@@ -210,13 +210,23 @@ def _build_yesterday_discovery_section() -> list[str]:
     lines = [f"\n📊 어제 발굴 성과 ({yesterday_str})"]
 
     # close_price/return_pct 가 있는 종목만 통계
+    # 휴장 의심 케이스 제외 (disc_price == close_price = KIS가 전일 종가만 반환한 휴장 데이터)
     completed = [
         r for r in records
         if r.get("close_price") and r.get("return_pct") is not None
+        and r.get("close_price") != r.get("disc_price")
     ]
 
     if not completed:
-        lines.append(f"  발굴 {len(records)}종목 — 종가 미기록 (closing_report 미실행)")
+        # 모든 레코드가 휴장 의심 패턴이면 휴장 안내, 아니면 갱신 미실행 안내
+        all_holiday = records and all(
+            r.get("close_price") and r.get("close_price") == r.get("disc_price")
+            for r in records
+        )
+        if all_holiday:
+            lines.append(f"  발굴 {len(records)}종목 — 휴장 의심 (KIS 데이터 전일종가 동일)")
+        else:
+            lines.append(f"  발굴 {len(records)}종목 — 종가 미기록 (closing_report 미실행)")
         return lines
 
     avg_ret = sum(r["return_pct"] for r in completed) / len(completed)

@@ -822,6 +822,11 @@ def _update_discovery_log(client) -> None:
 
                 if close_price > 0:
                     disc_price = entry.get("disc_price", 0)
+                    # 휴장일 보호: disc_price == close_price 케이스는 KIS API가 전일 종가만
+                    # 반환한 휴장 의심 데이터 → 갱신 스킵 (어제 발굴 성과에 0.0% 잘못 표기 방지)
+                    if disc_price > 0 and close_price == disc_price:
+                        print(f"[발굴로그] {code} 휴장 의심 (disc==close={close_price}) — 종가 갱신 스킵", file=sys.stderr)
+                        continue
                     entry["close_price"] = close_price
                     entry["return_pct"] = round((close_price - disc_price) / disc_price * 100, 2) if disc_price > 0 else None
                     entry["updated_at"] = _dt.now().strftime("%Y-%m-%dT%H:%M:%S")

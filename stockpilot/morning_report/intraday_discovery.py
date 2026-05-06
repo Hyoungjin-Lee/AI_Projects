@@ -122,6 +122,9 @@ def _load_today_other_period_discoveries(current_time_str: str) -> dict[str, str
         # 동일 시간대(같은 시) 발굴은 제외 (재확인 로직과 분리)
         if h == cur_h:
             continue
+        # 미래 시점 발굴 제외 (정상 운영에선 불가능, dry-run/재시뮬 안전장치)
+        if disc_t > current_time_str:
+            continue
         # 같은 종목이 여러 번 발굴된 경우 가장 빠른 시각 보존
         if code not in result or disc_t < result[code]:
             result[code] = disc_t
