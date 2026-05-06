@@ -1,9 +1,52 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-05-06 저녁 (v2.8.4 — 5/6 운영 검증 + NXT 안내문 핫픽스)
-> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.4 상태 복원
-> 다음 평일 (2026-05-07 목) 08:30 모닝 + 12:05/13:05 발굴 재모니터링 우선
+> 최종 업데이트: 2026-05-06 저녁 (v2.8.6 — 휴장 보호 + plist 운영 시각 핫픽스)
+> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.6 상태 복원
+> 다음 평일 (2026-05-07 목) 14:03/14:05 정상 실행 검증 우선
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
+
+---
+
+## 🆕 2026-05-06 (저녁) — v2.8.6: discovery5/6 plist 운영 시각 핫픽스
+
+### 발견된 운영 영향
+- **5/6(수) 14:03/14:05 미실행 + 15:03/15:05 충돌** — discovery5/6 plist의 화/수/목/금 항목 Hour가 14에서 15로 잘못 등록되어 있었음 (월요일만 정상)
+- 14:05 발굴 텔레그램 통째로 누락 (사용자 텔레그램 메시지에 14:05 결과 없음 = 일치)
+- 15:05에 round 26 + round 6 동시 실행 → round 6이 round5 데이터 만료로 exit 1 (`launchctl list discovery6 status 1` 흔적)
+
+### 핫픽스 적용 (2026-05-06 저녁, PlistBuddy)
+```
+/usr/libexec/PlistBuddy -c "Set :StartCalendarInterval:{1,2,3,4}:Hour 14" \
+  ~/Library/LaunchAgents/com.aigeenya.stockreport.discovery{5,6}.plist
+```
+- discovery5 5개 Weekday 모두 14:03 통일 ✅
+- discovery6 5개 Weekday 모두 14:05 통일 ✅
+- launchctl unload + load 재등록 완료 (status 0 확인)
+- 검증: 다음 평일(5/7 목) 14:03/14:05 정상 실행 확인 필요
+
+### 원인 추정
+v2.7.1 "round 5~8 plist 시각 14:03 원복" (HANDOFF 8-2섹션) 작업 시 discovery7/8은 인라인 형식으로 통일됐으나 discovery5/6은 화~금 4개 dict의 Hour 수정이 누락된 채 봉합. 신규 시간대 추가(round 9~26) 시 15:03/15:05와 정확히 충돌하여 오늘 발현.
+
+---
+
+## 🆕 2026-05-06 (저녁) — v2.8.5: 휴장일 보호 + 안전장치
+
+### 5/5 어린이날 휴장 진단
+- 5/5 발굴 10건 모두 `disc_price == close_price` 패턴 (예: 232500 → 232500)
+- KIS API가 휴장 시 전일 종가만 반환 → return_pct = 0.0 잘못 표기
+- 09:05/15:05 발굴 종목이 정확히 동일 5건씩 = 휴장 패턴 확정 (한국 어린이날)
+
+### 핫픽스 (3건)
+| 파일 | 변경 |
+|---|---|
+| `closing_report.py` | `disc_price == close_price` 시 휴장 의심으로 판정 → 종가 갱신 스킵 |
+| `morning_report.py` | `_build_yesterday_discovery_section` 필터 강화: 휴장 의심 자동 제외 + "발굴 N종목 — 휴장 의심 (KIS 데이터 전일종가 동일)" 안내 |
+| `intraday_discovery.py` | `_load_today_other_period_discoveries` 미래시점 발굴 제외 안전장치 (정상 운영선 불필요, dry-run/재시뮬 보호) |
+
+### 검증
+- `py_compile` 통과
+- 시뮬1: 12:05 시점에 13:05 미래 발굴 5건 자동 제외 (09:05 발굴 3건만 반환)
+- 시뮬2: 5/5 휴장 데이터 10건 → "휴장 의심" 안내 정상 출력
 
 ---
 
