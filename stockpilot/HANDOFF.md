@@ -1,9 +1,65 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-05-06 밤 (v2.8.8 — NXT Stage1 + 5/5 정정 + 단위테스트 + requirements)
-> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.8 상태 복원
+> 최종 업데이트: 2026-05-07 새벽 (v2.8.9 — NXT Stage2/3 + 회귀 검증)
+> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.9 상태 복원
 > 다음 평일 (2026-05-07 목) 운영 검증 + 5/9(토)/5/10(일) 메시지 미발송 확인 우선
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
+
+---
+
+## 🆕 2026-05-07 (새벽) — v2.8.9: NXT Stage2/3 + 회귀 검증
+
+### NXT 옵션 B WORKFLOW 진척
+- **Stage 2 (plan_draft):** `docs/14_nxt_integration/02_plan_draft.md`
+  - Task A~E 분해, 옵션 2 (N+X 듀얼) 권고 유지, 작업량 3.5h 추정
+- **Stage 3 (plan_review, High effort 자체 검토):** `docs/14_nxt_integration/03_plan_review.md`
+  - **R1~R10 보완점 10건 + 결정 5건**
+  - 핵심 보완: R3 output2(예수금) 차이 비교, R4 v2.7.4 충돌 회피, R5 morning_report 보류, R7 balance_diff 모듈 분리
+  - 작업량 재추정: 3.5h → **5h**
+- **Stage 4 (plan_final):** 형진님 결정 5건 후 진입
+  1. 옵션 2 채택 여부 (권고 ✅)
+  2. morning_report X 모드 적용 (권고 ✗ 보류)
+  3. balance_diff 별도 모듈 분리 (권고 ✅)
+  4. v2.8.4 안내문 제거 시점 (권고: Task E 검증 후)
+  5. 검증용 NXT 거래 의도 실행 (5/8 또는 5/9 NXT 매매 1건)
+
+### 회귀 검증 (108개 테스트 PASS)
+```
+tests/test_market_calendar.py     24 PASS  (신규)
+tests/test_kis_client_phase2.py    n PASS
+tests/test_pattern_lifecycle.py    n PASS
+tests/test_pending_proposals.py    n PASS
+tests/test_position_monitor.py    11 PASS
+tests/test_position_state.py      10 PASS
+tests/test_risk_analyzer.py        3 PASS
+tests/test_trading_state.py        8 PASS
+tests/test_validator.py           16 PASS
+─────────────────────────────────────────
+Total                            108 PASS  (0.56s)
+```
+
+→ v2.8.5~v2.8.8 변경이 기존 Phase 2 모듈에 회귀 영향 없음.
+
+### launchd plist 31개 전수 점검
+- 시간 불일치 0건 ✅
+- discovery5 (14:03) / discovery6 (14:05) status 0 정상화 확인
+- 다른 plist 시간 버그 추가 검출 0건
+
+### state_manager 분석 (discovery6 누락 가설 보강)
+- `state.update()` (line 76): shallow merge로 round 키 단순 추가 — **로직 자체는 정상**
+- `_load()` (line 110): 날짜 변경 시 초기화 트리거 (5/6 운영 중 트리거 안 됨)
+- 5/6 운영 후 state 누락 round: **[5, 6, 9, 10, 11, 12, 13, 14]**
+  - 5, 6 (14:03/14:05) = plist 버그로 미실행 → **정상 누락**
+  - **9~14 (10:03~11:05) = 실행됐는데 state 미저장 — 미스터리**
+- 가설:
+  1. 동시 _save race condition (file lock 없음)
+  2. 다른 프로세스(orchestrator/telegram_bot)가 state["intraday_discovery"]를 dict 통째로 덮어씀
+  3. _load에서 _EMPTY_STATE deep_merge가 round 키를 누락
+- **다음 평일(5/7) 운영 결과로 재현 여부 확인** — 재현 시 file lock 추가 또는 deep merge 검증
+
+---
+
+## 🆕 2026-05-06 (밤) — v2.8.8: NXT Stage1 + 5/5 정정 + 단위테스트 + requirements
 
 ---
 
