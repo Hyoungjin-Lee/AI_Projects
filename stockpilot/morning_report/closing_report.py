@@ -15,6 +15,7 @@ closing_report.py — 16:00 장마감 결산 브리핑
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime, date
 from pathlib import Path
@@ -32,6 +33,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from keychain_manager import inject_to_env
 inject_to_env()
 from state_manager import StateManager
+
+try:
+    from risk_analyzer import calculate_risk_snapshot, format_risk_section, save_snapshot
+    _RISK_AVAILABLE = True
+except ImportError:
+    _RISK_AVAILABLE = False
 
 _WEEKDAYS = {0, 1, 2, 3, 4}
 _JOURNAL_DIR = _ROOT / "reports" / "journal"
@@ -236,14 +243,33 @@ def _fetch_today_ohlcv(client, code: str) -> dict:
     today_vol = _safe_float(row.get("volume"))
     vol_ratio = today_vol / avg_vol if avg_vol > 0 else 1.0
 
+    # 등락률 수동 계산:
+    # KIS inquire-daily-itemchartprice 응답의 output2 행에는 prdy_ctrt(등락률)가 없고
+    # prdy_vrss(전일대비 절대값)만 존재한다. 따라서 (오늘종가 - 전일종가) / 전일종가 * 100
+    # 방식으로 직접 계산한다. (행 순서: KIS는 최신 → 과거 내림차순)
+    today_close = _safe_float(row.get("close"))
+    prev_close: float | None = None
+    if "close" in df.columns:
+        try:
+            today_pos = df.index.get_loc(today_row.index[0])
+            if today_pos + 1 < len(df):
+                prev_close = _safe_float(df.iloc[today_pos + 1].get("close"))
+        except Exception:
+            prev_close = None
+    if prev_close and prev_close > 0 and today_close:
+        change_pct = (today_close - prev_close) / prev_close * 100.0
+    else:
+        # fallback: 혹시 KIS가 향후 output2에 prdy_ctrt를 추가하면 그 값을 쓰도록
+        change_pct = _safe_float(row.get("change_pct"))
+
     return {
         "open":       _safe_float(row.get("open")),
         "high":       _safe_float(row.get("high")),
         "low":        _safe_float(row.get("low")),
-        "close":      _safe_float(row.get("close")),
+        "close":      today_close,
         "volume":     _safe_int(row.get("volume")),
         "change":     _safe_float(row.get("change")),
-        "change_pct": _safe_float(row.get("change_pct")),
+        "change_pct": change_pct,
         "vol_ratio":  round(vol_ratio, 2),
         "avg_vol_5d": round(avg_vol, 0),
     }
@@ -521,7 +547,23 @@ def _build_closing_report(today_str, holdings, daily_data, strategies, cash_info
         lines.append(f"  D+2 정산:     {d2:>12,.0f}원")
     lines.append(f"  주문가능:     {orderable:>12,.0f}원")
 
+    today_iso = datetime.now().strftime("%Y-%m-%d")
+    _append_portfolio_history(today_iso, display_net, invest_return)
+
+    risk_cfg = _load_strategy_config().get("risk_analysis") or {}
+    min_history_days = int(risk_cfg.get("min_history_days", 5) or 5)
+    history = _load_portfolio_history_60d()
+    if _RISK_AVAILABLE and risk_cfg.get("enabled") is True and len(history) >= min_history_days:
+        snapshot = calculate_risk_snapshot(
+            history,
+            confidence=float(risk_cfg.get("var_confidence", 0.95) or 0.95),
+            threshold_pct=float(risk_cfg.get("portfolio_stop_loss_pct", -15.0) or -15.0),
+        )
+        lines.append(format_risk_section(snapshot))
+        save_snapshot(snapshot)
+
     lines.append(f"\n※ {datetime.now().strftime('%H:%M')} 정규장 마감 기준. 실현손익은 체결내역을 확인하세요.")
+    lines.append("※ NXT 정규외(프리장) 거래는 정규장 데이터에 미반영 — 평가손익 별도 확인 권고")
     return "\n".join(lines)
 
 
@@ -683,6 +725,53 @@ def _safe_int(val, default=0) -> int:
         return int(str(val).replace(",", "").strip())
     except (ValueError, TypeError):
         return default
+
+
+def _load_strategy_config() -> dict:
+    cfg_file = _ROOT / "data" / "strategy_config.json"
+    try:
+        return json.loads(cfg_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[리스크] strategy_config 로드 실패 (무시): {e}", file=sys.stderr)
+        return {}
+
+
+def _load_portfolio_history_60d() -> list[dict]:
+    history_file = _ROOT / "data" / "portfolio_history.json"
+    if not history_file.exists():
+        return []
+    try:
+        data = json.loads(history_file.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return []
+        history = [row for row in data if isinstance(row, dict)]
+        return sorted(history, key=lambda row: row.get("date", ""))[-60:]
+    except Exception as e:
+        print(f"[리스크] portfolio_history 로드 실패 (무시): {e}", file=sys.stderr)
+        return []
+
+
+def _append_portfolio_history(date_str, total_value, total_return_pct) -> None:
+    history_file = _ROOT / "data" / "portfolio_history.json"
+    try:
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        if history_file.exists():
+            data = json.loads(history_file.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                data = []
+        else:
+            data = []
+        data = [row for row in data if isinstance(row, dict) and row.get("date") != date_str]
+        data.append({
+            "date": date_str,
+            "total_value": float(total_value or 0),
+            "total_return_pct": float(total_return_pct or 0),
+            "saved_at": datetime.now().isoformat(),
+        })
+        data = sorted(data, key=lambda row: row.get("date", ""))[-90:]
+        history_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[리스크] portfolio_history 저장 실패 (무시): {e}", file=sys.stderr)
 
 
 def _update_discovery_log(client) -> None:

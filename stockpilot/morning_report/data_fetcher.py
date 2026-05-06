@@ -96,6 +96,66 @@ def fetch_us_market() -> dict:
     return result
 
 
+# ── KOSPI 시장 레짐 ───────────────────────────────────────────────────────────
+
+def fetch_kospi_regime() -> dict:
+    """
+    KOSPI(^KS11) 직전 5거래일 평균 등락률 + 레짐 분류.
+    - 추세장: 5일 평균 ≥ +0.3%
+    - 하락장: ≤ -0.3%
+    - 횡보장: 그 외
+    """
+    result = {
+        "kospi": None,
+        "kospi_chg": None,
+        "kospi_5d_avg_pct": None,
+        "regime": None,
+        "fetched_at": datetime.now().isoformat(),
+    }
+    try:
+        import yfinance as yf
+        ks = yf.Ticker("^KS11")
+        # 현재가 + 전일종가 (fast_info)
+        try:
+            info = ks.fast_info
+            curr = round(float(info.last_price), 2) if info.last_price else None
+            prev = float(info.previous_close or 0)
+            result["kospi"] = curr
+            if curr and prev:
+                chg_pct = (curr - prev) / prev * 100
+                result["kospi_chg"] = f"{chg_pct:+.2f}%"
+        except Exception as e:
+            print(f"[KOSPI] fast_info 실패: {e}", file=sys.stderr)
+
+        # 5일 평균 등락률 — 직전 6봉 종가에서 5개의 일별 등락률 평균
+        try:
+            hist = ks.history(period="10d")  # 여유 있게 10일치 fetch
+            closes = [c for c in hist["Close"].tolist() if c]
+            if len(closes) >= 6:
+                tail = closes[-6:]  # 최근 6봉
+                daily_returns = [
+                    (tail[i] - tail[i-1]) / tail[i-1] * 100
+                    for i in range(1, 6)
+                    if tail[i-1]
+                ]
+                if daily_returns:
+                    avg = sum(daily_returns) / len(daily_returns)
+                    result["kospi_5d_avg_pct"] = round(avg, 2)
+                    if avg >= 0.3:
+                        result["regime"] = "추세장"
+                    elif avg <= -0.3:
+                        result["regime"] = "하락장"
+                    else:
+                        result["regime"] = "횡보장"
+        except Exception as e:
+            print(f"[KOSPI] 5일 평균 계산 실패: {e}", file=sys.stderr)
+    except ImportError:
+        print("[KOSPI] yfinance 미설치 — 레짐 수집 생략", file=sys.stderr)
+    except Exception as e:
+        print(f"[KOSPI] 전체 수집 실패: {e}", file=sys.stderr)
+    return result
+
+
 # ── 달러/원 환율 ──────────────────────────────────────────────────────────────
 
 def fetch_usd_krw() -> dict:
@@ -267,6 +327,9 @@ def fetch_all(holdings: list) -> dict:
     print("[데이터수집] 미국 시장 지수...", file=sys.stderr)
     us_market = fetch_us_market()
 
+    print("[데이터수집] KOSPI 시장 레짐...", file=sys.stderr)
+    kospi = fetch_kospi_regime()
+
     print("[데이터수집] 달러/원 환율...", file=sys.stderr)
     fx = fetch_usd_krw()
 
@@ -301,6 +364,7 @@ def fetch_all(holdings: list) -> dict:
 
     return {
         "us_market":  us_market,
+        "kospi":      kospi,
         "fx":         fx,
         "fear_greed": fear_greed,
         "stocks":     stock_data,

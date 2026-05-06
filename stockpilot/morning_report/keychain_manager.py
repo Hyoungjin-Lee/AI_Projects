@@ -1,22 +1,22 @@
 """
 keychain_manager.py — macOS Keychain 기반 민감정보 관리
 
-저장 항목:
-  KIS_APP_KEY          KIS API 앱키
-  KIS_APP_SECRET       KIS API 앱시크릿
-  KIS_ACCOUNT_NO       계좌번호 (12345678-01 형식)
-  KIS_HTS_ID           MTS/홈페이지 로그인 ID
-  TELEGRAM_BOT_TOKEN   텔레그램 봇 토큰
-  TELEGRAM_CHAT_ID     텔레그램 chat_id
+저장 항목 (관측/발굴용 — 기존):
+  KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_HTS_ID
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+저장 항목 (실전 매매용 — Phase 2):
+  KIS_TRADING_APP_KEY, KIS_TRADING_APP_SECRET, KIS_TRADING_ACCOUNT_NO
 
 사용법:
   from keychain_manager import inject_to_env
   inject_to_env()   # Keychain에서 로드 → os.environ 주입. 없으면 입력 받아 저장.
 
 CLI로 직접 실행 시:
-  python3 keychain_manager.py          # 현재 저장값 확인
-  python3 keychain_manager.py --reset  # 전체 재입력 + 연결 테스트
-  python3 keychain_manager.py --reset KIS_APP_KEY   # 특정 항목만 재입력
+  python3 keychain_manager.py                      # 현재 저장값 확인
+  python3 keychain_manager.py --reset              # 관측용 전체 재입력
+  python3 keychain_manager.py --reset KIS_APP_KEY  # 관측용 일부 재입력
+  python3 keychain_manager.py --reset-trading      # 실전 매매 키 그룹 재입력 (3개 일괄)
 
 초기 설정 흐름:
   1. 앱키 → 앱시크릿 → 계좌번호 → 로그인 ID 순서로 입력
@@ -49,10 +49,27 @@ _ITEMS = [
     ("KIS_HTS_ID",     "로그인 ID            (MTS/홈페이지 로그인 ID)",    False),
 ]
 
+# 실전 매매 전용 KIS 키 그룹 (Phase 2).
+# 관측용 _ITEMS와 동일한 스키마 (key, 설명, masked) 유지 → _test_balance 재사용.
+_TRADING_ITEMS = [
+    ("KIS_TRADING_APP_KEY", "실전 매매용 KIS 앱키      (KIS 개발자센터 → 신규 앱 생성 권장)", True),
+    ("KIS_TRADING_APP_SECRET", "실전 매매용 KIS 앱시크릿  (위 앱의 시크릿)", True),
+    ("KIS_TRADING_ACCOUNT_NO", "실전 매매용 소액계좌번호  (형식: 12345678-01)", False),
+]
+
 # 텔레그램 항목 (연결 테스트 없이 단순 로드): 키 이름 목록
 _TELEGRAM_KEYS = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
 
 MAX_ATTEMPTS = 3  # 연결 테스트 최대 재시도 횟수
+
+
+def _mask(value: str, show: int = 4) -> str:
+    """민감정보 마스킹 — 상태 출력/확인 메시지에서만 앞 n자리 표시."""
+    if not value:
+        return "(없음)"
+    if len(value) <= show:
+        return "****"
+    return value[:show] + "*" * min(len(value) - show, 8)
 
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
@@ -96,6 +113,12 @@ def inject_to_env(reset_keys: list[str] | None = None):
         if val:
             os.environ[key] = val
 
+    # 실전 매매 그룹 로드 (미설정이어도 관측 기능에 영향 없음)
+    for key, _, _ in _TRADING_ITEMS:
+        val = keyring.get_password(_SERVICE, key)
+        if val:
+            os.environ[key] = val
+
 
 def show_status():
     """현재 Keychain 저장 상태 출력."""
@@ -106,8 +129,7 @@ def show_status():
     for key, desc, _ in _ITEMS:
         val = keyring.get_password(_SERVICE, key)
         if val:
-            masked = val[:4] + "*" * min(len(val) - 4, 8) if len(val) > 4 else "****"
-            print(f"  ✅ {key:<20} {masked}")
+            print(f"  ✅ {key:<20} {_mask(val)}")
         else:
             print(f"  ❌ {key:<20} (미설정)")
             all_ok = False
@@ -116,10 +138,21 @@ def show_status():
     for key in _TELEGRAM_KEYS:
         val = keyring.get_password(_SERVICE, key)
         if val:
-            masked = val[:4] + "*" * min(len(val) - 4, 8) if len(val) > 4 else "****"
-            print(f"  ✅ {key:<20} {masked}")
+            print(f"  ✅ {key:<20} {_mask(val)}")
         else:
             print(f"  ⚠️  {key:<20} (미설정 — setup_telegram.py 실행)")
+    print()
+    print("  💼 실전 매매 계좌 (Phase 2 승인형 매매)")
+    all_trading_ok = True
+    for key, _, _ in _TRADING_ITEMS:
+        val = keyring.get_password(_SERVICE, key)
+        if val:
+            print(f"  ✅ {key:<26} {_mask(val)}")
+        else:
+            print(f"  ⚠️  {key:<26} (미설정)")
+            all_trading_ok = False
+    if not all_trading_ok:
+        print("     → 등록: python3 morning_report/keychain_manager.py --reset-trading")
     print("-" * 55)
     if all_ok:
         print("  KIS 항목이 모두 설정되어 있습니다.")
@@ -175,8 +208,7 @@ def _prompt_test_and_save(items: list, secrets: dict):
         for key, desc, masked in items_to_ask:
             current = candidate.get(key) or keyring.get_password(_SERVICE, key)
             if current:
-                masked_current = current[:4] + "*" * (len(current) - 4) if len(current) > 4 else "****"
-                hint = f" (현재값: {masked_current}, 엔터 시 유지)"
+                hint = f" (현재값: {_mask(current)}, 엔터 시 유지)"
             else:
                 hint = ""
 
@@ -257,6 +289,92 @@ def _prompt_test_and_save(items: list, secrets: dict):
             print("    python3 morning_report/keychain_manager.py --reset")
             print("=" * 55)
             sys.exit(1)
+
+
+def _prompt_trading_group_and_save():
+    """
+    실전 매매 전용 KIS 키 그룹(APP_KEY/SECRET/ACCOUNT_NO) 입력 → 잔고 조회 테스트 → 저장.
+    연결 테스트는 기존 _test_balance()를 재사용 (동일 스키마 dict 전달).
+    최대 MAX_ATTEMPTS회 실패 시 sys.exit(1).
+    """
+    import getpass
+
+    print()
+    print("=" * 55)
+    print("💼 실전 매매 전용 KIS 키 그룹 등록")
+    print("=" * 55)
+    print("Phase 2 자동매매는 이 키 그룹으로만 주문됩니다.")
+    print("관측/발굴용(KIS_APP_KEY 등)과 **완전히 독립**된 앱 키입니다.")
+    print()
+    print("준비물:")
+    print("  1. KIS 개발자센터(apiportal.koreainvestment.com)에서 새 앱 생성")
+    print("  2. 해당 앱에 소액계좌 연결")
+    print("  3. 발급된 APP_KEY / APP_SECRET")
+    print("  4. 소액계좌 번호 (12345678-01 형식)")
+    print()
+
+    candidate = {}
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            print()
+            print(f"─── 재입력 ({attempt}/{MAX_ATTEMPTS}) ───────────────────────────")
+
+        for key, desc, masked in _TRADING_ITEMS:
+            current = candidate.get(key) or keyring.get_password(_SERVICE, key)
+            if current:
+                hint = f" (현재값: {_mask(current)}, 엔터 시 유지)"
+            else:
+                hint = ""
+
+            while True:
+                prompt = f"  {desc}{hint}\n  → {key}: "
+                val = getpass.getpass(prompt) if masked else input(prompt).strip()
+                if not val and current:
+                    val = current
+                    print("    (기존값 유지)")
+                    break
+                if val:
+                    if key == "KIS_TRADING_ACCOUNT_NO" and "-" not in val:
+                        print("    ⚠️  형식 오류. '12345678-01' 처럼 하이픈을 포함해야 합니다.")
+                        continue
+                    break
+                print("    ⚠️  값을 입력해주세요.")
+            candidate[key] = val
+
+        test_creds = {
+            "KIS_APP_KEY": candidate["KIS_TRADING_APP_KEY"],
+            "KIS_APP_SECRET": candidate["KIS_TRADING_APP_SECRET"],
+            "KIS_ACCOUNT_NO": candidate["KIS_TRADING_ACCOUNT_NO"],
+        }
+        print()
+        print(f"  [테스트 {attempt}/{MAX_ATTEMPTS}] 소액계좌 연결 확인 중...")
+        ok, err, _token = _test_balance(test_creds)
+        if ok:
+            print("  ✅ 소액계좌 잔고 조회 성공")
+            for key, _, _ in _TRADING_ITEMS:
+                keyring.set_password(_SERVICE, key, candidate[key])
+            print()
+            print("=" * 55)
+            print("✅ 실전 매매 키 그룹 저장 완료")
+            print("=" * 55)
+            print()
+            return
+
+        print(f"  ❌ 연결 실패: {err}")
+        remaining = MAX_ATTEMPTS - attempt
+        if remaining == 0:
+            print()
+            print("=" * 55)
+            print("❌ 실전 매매 키 그룹 등록 실패 — 프로그램 종료")
+            print("=" * 55)
+            print("  확인 방법:")
+            print("  1. KIS 개발자센터에서 해당 앱이 활성 상태인지 확인")
+            print("  2. 앱에 해당 소액계좌가 연결되어 있는지 확인")
+            print("  3. 앱키 / 앱시크릿 오타 없는지 확인")
+            print()
+            sys.exit(1)
+        print(f"  남은 시도: {remaining}회")
 
 
 def _test_balance(creds: dict) -> tuple[bool, str | None, str | None]:
@@ -399,11 +517,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="KIS API 인증정보 관리 (Keychain)")
     parser.add_argument(
         "--reset", nargs="*", metavar="KEY",
-        help="재입력할 항목 (지정 없으면 전체 재입력). 예: --reset KIS_APP_KEY"
+        help="관측용 항목 재입력 (지정 없으면 전체). 예: --reset KIS_APP_KEY"
+    )
+    parser.add_argument(
+        "--reset-trading", action="store_true",
+        help="실전 매매용 KIS 키 그룹(APP_KEY/SECRET/ACCOUNT_NO) 전체 재입력"
     )
     args = parser.parse_args()
 
-    if args.reset is not None:
+    if args.reset_trading:
+        _prompt_trading_group_and_save()
+        show_status()
+    elif args.reset is not None:
         reset_keys = args.reset if args.reset else [k for k, _, _ in _ITEMS]
         get_secrets(reset_keys=reset_keys)
         show_status()

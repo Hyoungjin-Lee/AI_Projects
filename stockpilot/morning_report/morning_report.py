@@ -16,7 +16,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -177,6 +177,79 @@ def run(dry_run: bool = False):
 
 # ── 보고서 빌더 ───────────────────────────────────────────────────────────────
 
+def _previous_trading_day(today: date) -> date:
+    """이전 거래일 (주말 제외, 공휴일은 KIS 응답으로 감지하지 않음 — 단순 weekday 기준)."""
+    d = today - timedelta(days=1)
+    while d.weekday() >= 5:  # 토(5), 일(6) 스킵
+        d -= timedelta(days=1)
+    return d
+
+
+def _build_yesterday_discovery_section() -> list[str]:
+    """B1 — 전 거래일 발굴 종목 성과 요약 (data/discovery_log.json 기반)."""
+    log_file = _ROOT / "data" / "discovery_log.json"
+    if not log_file.exists():
+        return []
+
+    try:
+        data = json.loads(log_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[발굴성과] discovery_log 로드 실패: {e}", file=sys.stderr)
+        return []
+
+    if not isinstance(data, list) or not data:
+        return []
+
+    yesterday = _previous_trading_day(date.today())
+    yesterday_str = yesterday.isoformat()
+    records = [r for r in data if r.get("date") == yesterday_str]
+
+    if not records:
+        return []
+
+    lines = [f"\n📊 어제 발굴 성과 ({yesterday_str})"]
+
+    # close_price/return_pct 가 있는 종목만 통계
+    completed = [
+        r for r in records
+        if r.get("close_price") and r.get("return_pct") is not None
+    ]
+
+    if not completed:
+        lines.append(f"  발굴 {len(records)}종목 — 종가 미기록 (closing_report 미실행)")
+        return lines
+
+    avg_ret = sum(r["return_pct"] for r in completed) / len(completed)
+    avg_emoji = "🟢" if avg_ret >= 0 else "🔴"
+    lines.append(f"  발굴 {len(completed)}종목 → 평균 {avg_emoji} {avg_ret:+.1f}%")
+
+    # 점수 순 상위 3개
+    top3 = sorted(completed, key=lambda r: -r.get("score", 0))[:3]
+    medals = ["🥇", "🥈", "🥉"]
+    for i, r in enumerate(top3):
+        ret_pct = r["return_pct"]
+        emoji = "🟢" if ret_pct >= 0 else "🔴"
+        disc_time = r.get("disc_time", "")
+        time_suffix = f" {disc_time}" if disc_time else ""
+        lines.append(
+            f"  {medals[i]} {r['name']}({r['code']}) {r['score']}점{time_suffix} → {emoji} {ret_pct:+.1f}%"
+        )
+
+    return lines
+
+
+def _build_kospi_regime_section(kospi: dict) -> list[str]:
+    """B2 — KOSPI 시장 레짐 한 줄 표시."""
+    if not kospi:
+        return []
+    regime = kospi.get("regime")
+    avg = kospi.get("kospi_5d_avg_pct")
+    if regime is None or avg is None:
+        return []
+    emoji = {"추세장": "📈", "횡보장": "📊", "하락장": "📉"}.get(regime, "📊")
+    return [f"\n{emoji} 시장 레짐: {regime} (KOSPI 5일 {avg:+.1f}%)"]
+
+
 def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, balance_raw) -> str:
     lines = []
 
@@ -213,6 +286,12 @@ def _build_report(today_str, holdings, analysis, weekly, cash_info, ext_data, ba
     if fg.get("score") is not None:
         fg_emoji = _fg_emoji(fg["score"])
         lines.append(f"  공포탐욕 {fg_emoji} {fg['score']} ({fg['rating']})")
+
+    # ── KOSPI 시장 레짐 (B2) ──────────────────────────────────────────────────
+    lines.extend(_build_kospi_regime_section(ext_data.get("kospi", {})))
+
+    # ── 어제 발굴 성과 요약 (B1) ──────────────────────────────────────────────
+    lines.extend(_build_yesterday_discovery_section())
 
     # ── 보유 종목 현황 ────────────────────────────────────────────────────────
     lines.append("\n💼 보유 종목 현황")

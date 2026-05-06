@@ -1,7 +1,7 @@
 {
   "_comment": "매매 전략 설정 파일 — 수치 조정 시 이 파일만 수정하면 전체 반영",
-  "_version": "1.0",
-  "_updated": "2026-04-20",
+  "_version": "2.0",
+  "_updated": "2026-04-23",
 
   "entry": {
     "_comment": "매수 진입 조건 (B+C 조합 — 추세추종)",
@@ -60,9 +60,40 @@
     "note": "기본 R:R = 1:1.67 이상, 트레일링 시 무제한"
   },
 
+  "trading": {
+    "_comment": "Phase 2 승인형 매수 + 자동 매도 튜너블. position_monitor/validator가 참조.",
+    "account_env_prefix": "KIS_TRADING",
+    "reserve_ratio": 0.10,
+    "split_weights": [0.5, 0.3, 0.2],
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.05,
+    "trailing_activate_pct": 0.02,
+    "trailing_window_days": 5,
+    "trailing_drop_pct": 0.03,
+    "price_deviation_guard_pct": 0.03,
+    "resuggest_timeout_seconds": 180,
+    "resuggest_max_count": 3,
+    "cooldown_seconds": 300,
+    "max_daily_loss_mode": "auto_orderable_cash",
+    "max_daily_loss_krw_override": null,
+    "max_buy_trades_per_day": 10,
+    "trial_mode_default_max_buys": 1,
+    "market_close_sell_first_hhmm": "15:15",
+    "market_close_sell_retry_hhmm": "15:25",
+    "telegram_send_rate_per_sec": 1
+  },
+
+  "risk_analysis": {
+    "enabled": false,
+    "var_confidence": 0.95,
+    "min_history_days": 5
+  },
+
   "notes": [
     "수치(%)는 며칠 테스트 후 조정 예정",
     "진입 조건 3개 모두 충족 시에만 매수",
-    "매도 조건은 우선순위 순서대로 체크 (① → ④)"
+    "매도 조건은 우선순위 순서대로 체크 (① → ④)",
+    "Phase 2 trading 섹션: max_daily_loss_mode='auto_orderable_cash'는 자정마다 KIS_TRADING_ACCOUNT_NO의 주문가능금액 스냅샷을 손실한도로 사용",
+    "Phase 2 주문은 KIS_TRADING_APP_KEY 그룹 전용 (관측용 KIS_APP_KEY와 완전 분리)"
   ]
 }

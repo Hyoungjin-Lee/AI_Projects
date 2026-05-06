@@ -1,7 +1,167 @@
 # 🤝 stockpilot — Handoff 문서
 
-> 최종 업데이트: 2026-04-22 (v2.7.3 — 핫픽스 3종 완료, Stage 12 QA 진행 중)
+> 최종 업데이트: 2026-05-06 저녁 (v2.8.4 — 5/6 운영 검증 + NXT 안내문 핫픽스)
+> 다음 세션 시작 시: 본 문서 먼저 읽고 v2.8.4 상태 복원
+> 다음 평일 (2026-05-07 목) 08:30 모닝 + 12:05/13:05 발굴 재모니터링 우선
 > 목적: 새 대화창에서 즉시 작업을 이어받을 수 있도록 현재 상태 전달
+
+---
+
+## 🆕 2026-05-06 (저녁) — v2.8.4: 5/6 운영 검증 + NXT 안내문 핫픽스
+
+### 5/6 (수) 운영 검증 결과 (텔레그램 메시지 기준)
+
+| 검증 항목 | 결과 | 비고 |
+|---|---|---|
+| 08:30 모닝 — B1/B2 두 섹션 | ❌ 누락 | v2.8.3 코드 mtime 10:04 → 08:30 실행 시점 미적용 (예상 결과) |
+| 09:05 발굴 — 한국어 시간/분리 | ❌ 옛 형식 | 코드 적용 전 실행 (예상 결과) |
+| 12:05 발굴 — 한국어 시간/점심 표시 | ✅ | "🔍 12시 5분 발굴 (점심 신뢰도 ↓)" 정상 |
+| 12:05 발굴 — 신규/재등장 분리 | ❌ 미작동 | 옛 형식 ("후보 7종목 → 상위 3종목 선정") |
+| 13:05 발굴 — 한국어 시간 | ✅ | "🔍 1시 5분 발굴" 정상 |
+| 13:05 발굴 — 신규/재등장 분리 | ❌ 미작동 | 옛 형식 |
+| 13:05 발굴 — 15% 자동 제외 | ⚠️ | 삼전 +15.1% / 미래에셋 +21.1% 통과 |
+| 15:05 발굴 — 신규/재등장 분리 | ✅ | "후보 3종목 → 신규 0 + 재등장 3" 정상 |
+| 15:05 발굴 — 한국어 시간 | ✅ | "🔍 3시 5분 발굴" 정상 |
+| 20:30 클로징 — 기본 동작 | ✅ | SK하이닉스 양봉/거래량/손절가 정상 |
+| 20:30 클로징 — 평가손익 정확성 | 🔴 | NXT 정규외 거래 미반영 → 사용자 지적 |
+
+### 핫픽스 (closing_report.py)
+- 마지막 안내문에 1줄 추가:
+  ```
+  ※ NXT 정규외(프리장) 거래는 정규장 데이터에 미반영 — 평가손익 별도 확인 권고
+  ```
+
+### 진단 분석 (코드 점검 + dry-run 시뮬레이션)
+
+**현재 코드(working tree)는 정상 작동 확인됨:**
+- `_build_message` (intraday_discovery.py line 1709~1783): 분리 로직 정상 구현
+- `_load_today_other_period_discoveries` (line 85): 시간대 비교 로직 정상
+- 17:51 시점에 round18 (12:05) 데이터로 시뮬레이션 → "신규 0 + 재등장 7" 정상 출력
+- `_MAX_FLC_PCT = 15.0` 부등호 `>=` (line 1663): 정상
+
+**12:05/13:05 옛 형식 출력 원인 (미확정 가설):**
+1. v2.8.3 작업이 git 미반영 상태에서 단계적으로 적용됨 → 12:05/13:05 실행 시점에는 _build_message가 옛 코드였을 가능성 (mtime은 마지막 수정 1회만 기록)
+2. 13:05에 삼전 +15.1% 통과 = 점수 산정 시점엔 14.x%였다가 메시지 출력 시점에 15.1%로 갱신된 데이터 변동 가능성
+
+**검증 방법:** 다음 평일(5/7 목) 08:30~15:05 자동 운영 결과 재모니터링.
+
+### 발견 부수 사항
+- **5/5 발굴 10건 모두 `return_pct=0.0`** — close_price는 정상이지만 등락률이 0%. closing_report 계산 또는 데이터 갱신 로직 점검 필요 (5/5 어린이날 휴장 가능성? — 그러나 _previous_trading_day는 weekday 기준이라 공휴일 미감지)
+- **`_load_today_other_period_discoveries` 안전장치 부족** — 현재 시점보다 늦은 발굴도 시간대만 다르면 포함. 정상 운영에서는 영향 없으나 dry-run/재실행 시 오작동 가능. 백로그.
+
+### 백로그 추가 (NXT 거래 통합 — Phase별)
+
+| 옵션 | 작업량 | 효과 | 우선순위 |
+|---|---|---|---|
+| **A. 단기 안내문** | 5분 | 사용자 인지 (✅ 완료) | 완료 |
+| **B. KIS NXT 거래 API 통합** | 1~2시간 + WORKFLOW Stage 1~7 | 정확한 평가손익 | 높음 (다음 세션 위임) |
+| **C. closing_report 시각 변경** | plist 수정 + 데이터 시점 조정 | NXT 종가 기준 정합 | 중간 (옵션 B 검토 후 결정) |
+
+### 다음 세션 작업
+1. **5/7 (목) 자동 운영 모니터링** — 모든 시간대 v2.8.3 적용 확인
+2. **5/5 return_pct=0.0 원인 점검** — closing_report `return_pct` 계산 로직 또는 5/5 휴장 여부 확인
+3. **옵션 B 검토 시작** — `docs/api/한국투자증권_오픈API_전체문서.xlsx`에서 NXT 거래내역 조회 API 탐색 → WORKFLOW Stage 1 (브레인스토밍) 진입
+4. **`_load_today_other_period_discoveries` 안전장치 추가** (낮은 우선순위) — `disc_t < current_time_str` 조건 추가
+
+---
+
+## 🆕 2026-05-06 (밤) — v2.8.3 발굴 필터 강화
+
+**핫픽스 (intraday_discovery.py):**
+- `_MAX_FLC_PCT = 15.0` — 등락률 +15% 이상 종목 발굴 자동 제외 (이미 큰 폭 상승 = 발굴 의미 없음)
+- `_load_today_other_period_discoveries()` 헬퍼 — 오늘 다른 시간대 발굴 종목 로드
+- `_split_new_and_repeat()` 헬퍼 — scored 결과를 신규/재등장 분리
+- `_build_message` 4종 모두 업데이트:
+  · 메인 섹션: 신규 발굴 종목만 (top 3)
+  · "📋 추가 관심 후보": 신규 4-5위만 기준
+  · 신규 섹션 "🔁 이전 발굴 재등장": 다른 시간대 발굴 종목 + 발굴 시각 + 현재 등락률
+  · 요약: `후보 N종목 → 신규 X + 재등장 Y`
+
+**버그 수정:** 모듈에 `import json` 누락 — 함수 내부에 `import json as _json` 추가 (silently 빈 결과 반환되던 문제)
+
+**검증:**
+- py_compile 통과
+- _korean_hm / _get_time_thresholds / _split_new_and_repeat 단위 테스트 통과
+- 실데이터 시뮬레이션 (오늘 17건 발굴 데이터) 정상 동작 확인
+
+**예상 효과 (내일 운영):**
+- 카카오뱅크/카카오페이 같이 9시 발굴됐던 종목이 12시/13시에 또 메인에 나오는 중복 표시 해소
+- 미래에셋(+21.1%) 같은 +15% 이상 종목 자동 제외
+- 메시지 가독성 ↑ (진짜 신규 발굴이 묻히지 않음)
+
+---
+
+## 🆕 2026-05-06 (저녁) — Briefing Enhancement v2.8.1~v2.8.2
+
+**완료 (Claude 직접 핫픽스, 5건):**
+- 발굴 필터 완화 (옵션 D): `_TOP_N` 30→50, 이격도 임계 120→130
+- 작업 1 — 텔레그램 헤더 시간대 통일: `_korean_hm()` 헬퍼 + 4개 _build_message 헤더
+- B1 — 모닝 리포트 "어제 발굴 성과" 섹션 (`_build_yesterday_discovery_section`)
+- B2 — 모닝 리포트 "KOSPI 시장 레짐" 섹션 (yfinance ^KS11 → 추세장/횡보장/하락장)
+- A2 — `_score_candidate()` 시간대별 임계값 차등 (9시 110/2.0 ~ 12시 125/3.0)
+- A3 — `_time_header()` 12시 발굴 시 "(점심 신뢰도 ↓)" 자동 표시
+
+**Codex 위임 3건 완료 (2026-05-06 저녁):**
+- ✅ [Brief 13-A](docs/13_briefing_enhancement/06_codex_brief_a1.md) — A1 시간대 확장: intraday_discovery.py round 9~26 (18개) + dispatcher 26개 + _track_recent_picks 일반화. plist 18개 (Claude 직접 생성, Codex 샌드박스 권한 부재). launchctl 27개 등록 완료
+- ✅ [Brief 13-B](docs/13_briefing_enhancement/07_codex_brief_b3.md) — B3 risk_analyzer.py + closing_report 통합 + KOSPI 스트레스 시나리오 5종 + strategy_config risk_analysis 섹션. 단위 테스트 3건 pass
+- ✅ [Brief 13-C](docs/13_briefing_enhancement/08_codex_brief_c1.md) — C1 pattern_lifecycle.py + plist (20:35) 등록. 첫 dry-run: +24h 41건 / +72h 25건 추적 가능
+
+**자동 실행 스케줄 확장 (평일 텔레그램 발송 8회 → 14회):**
+| 시각 | 내용 |
+|------|------|
+| 08:30 | 모닝 브리핑 (B1+B2 추가됨) |
+| 09:05/09:33 | 9시 발굴/재발굴 (기존) |
+| **10:05/10:33** | **10시 발굴/재발굴 (신규)** |
+| **11:05/11:33** | **11시 발굴/재발굴 (신규)** |
+| **12:05/12:33** | **12시 발굴/재발굴 (신규, 점심 신뢰도 ↓)** |
+| **13:05/13:33** | **13시 발굴/재발굴 (신규)** |
+| 14:05/14:33 | 14시 발굴/재발굴 (기존) |
+| **15:05** | **15시 발굴 (신규, 재발굴 없음)** |
+| 20:30 | 클로징 리포트 (리스크 분석 옵션) |
+| 20:35 | pattern_lifecycle 후속 추적 (NEW, 백그라운드) |
+| 23:30 | 야간 종목 발굴 |
+
+**관련 문서:**
+- [docs/13_briefing_enhancement/04_plan_final.md](docs/13_briefing_enhancement/04_plan_final.md) — Stage 4 통합 plan (Q1=C, Q2=A, Q3=B 결정 반영)
+
+**다음 작업:**
+- Codex 위임 3건 호출 (Brief 13-A → 13-B → 13-C 순차)
+- 각 brief 완료 후 Stage 9 코드 리뷰
+- 통합 검증 후 HANDOFF v2.8.x 갱신
+
+---
+
+## 🆕 2026-05-06 (낮) — Pattern Integration v2.8.0
+
+---
+
+## 🆕 2026-05-06 업데이트 — Pattern Integration (5종 매매법 + 4개 외부 레포 차용)
+
+**완료된 단계:** Stage 1 (brainstorm) → Stage 2 (plan_draft) → Stage 3 (review, 20건) → Stage 4 (plan_final, 형진님 승인) → Stage 5 Phase A (technical_design_A)
+
+**핵심 결정:**
+- 5종 매매법 (바닥/뚜껑/서치/공급/라인) — 6단 게이트로 통합
+- 외부 레포 차용:
+  · TradingAgents → R17 Bull/Bear 게이트 (2-stage)
+  · Vibe-Trading → R18 ADX > 25 필터 + R19 VaR/CVaR/스트레스 시나리오
+  · AutoHedge → 미채택 (정량 룰 부재)
+  · QuantDinger → R21 별도 논의 (리스크 디폴트)
+- 도입 순서: 서치(B) → 공급/라인+Bull/Bear(C) → 바닥/뚜껑(D) → 레짐+리스크분석(E)
+- 신규 매수 강화: B+C + ADX + Bull/Bear 토론
+- 단계적 롤아웃: Shadow → Alert → Trade-Small → Trade-Full
+
+**선행 조건 (P0):** Phase 2 Brief A~F 구현 완료 + Trade-Small 검증 통과 = Phase A 착수 게이트
+
+**문서:**
+- `docs/12_pattern_integration/02_plan_draft.md`
+- `docs/12_pattern_integration/03_plan_review.md` (R1~R21, 19건 + 결정 2)
+- `docs/12_pattern_integration/04_plan_final.md` (✅ 형진님 승인)
+- `docs/12_pattern_integration/05_technical_design_A.md` (Phase A 인프라 6모듈 + KIS 점검)
+
+**다음 작업:**
+- Phase 2 Brief A~F 구현 + Trade-Small 검증 → 통과 시 Phase A 착수
+- Stage 8 Codex 위임: Brief A-1 (지표/캔들) → A-2 (라인/패턴 골격) → A-3 (라이프사이클/리스크/KIS점검)
+- Phase B~E 기술 설계는 Phase A 검증 완료 후 후속 stage로 작성
 
 ---
 
@@ -327,6 +487,51 @@ inject_to_env()  # 반드시 첫 줄에 호출
 
 ---
 
+## 8-4. v2.7.4 — closing_report change_pct 핫픽스 + Phase 2 Stage 4 완료 (2026-04-22)
+
+### ✅ 핫픽스 — closing_report.py 0.00% 버그
+
+- **증상:** `closing_report.py` 실행 시 holdings_signals의 일부 종목 `change_pct`가 `0.00%`로 표시되는 버그
+- **원인:** `change_pct`가 KIS API 응답의 `prdy_ctrt` 필드(어제 종가 대비 오늘 종가 등락률)에 의존했으나, 특정 시점 응답에서 해당 필드가 0.00으로 내려오는 케이스 존재
+- **조치:** `change_pct`를 `today_close vs prev_close` 기반 **수동 계산**으로 전환
+  - `change_pct = (today_close - prev_close) / prev_close × 100`
+  - 일봉 차트에서 직접 당일 종가 · 전일 종가를 가져와 계산
+- **부작용 복구 — 캔들 분석:** 수동 계산 과정에서 캔들 판정 로직에 side-effect 발생 → 도지(doji) 오탐 이슈. 정확한 캔들 판정 로직으로 복구.
+- **운영 검증 (04-22 journal_20260422.md):**
+  - GS건설: **-3.25%** ✅ (이전엔 0.00%)
+  - LS ELECTRIC: **+5.14%** ✅
+  - 삼성E&A: **-2.13%** ✅
+  - 캔들 판정도 정상 (도지 오탐 사라짐)
+
+### ✅ Phase 2 — 텔레그램 승인형 매수/자동 매도 계획 수립
+
+- **Stage 1 브레인스토밍** 완료 (`docs/11_phase2_trading/01_brainstorm.md`)
+  - Approval Workflow 전환: 봇 제안 → `/매수함` · `/매수안함` · `/종목변경` 3종 명령
+  - 매매 계좌 분리: Keychain `KIS_TRADING_ACCOUNT_NO` 신규
+  - 매도 자동 실행 (하드스탑 -3% / 트레일링 / 목표 +5% / 장마감)
+  - MAX_DAILY_LOSS 위반 시 `sys.exit` 폐기 → 주문 차단 플래그 + 자정 자동 해제
+- **Stage 2 계획 초안** 완료 (`docs/11_phase2_trading/02_plan_draft.md`)
+- **Stage 3 계획 검토** 완료 (`docs/11_phase2_trading/03_plan_review.md`, 수정 제안 16건)
+- **Stage 4 계획 통합 (plan_final)** 완료 (`docs/11_phase2_trading/04_plan_final.md`)
+  - 주요 통합 결과:
+    - MAX_DAILY_LOSS = 절대금액(원) + 실현손익만
+    - 장마감 청산 = 15:15 시장가 → 15:25 동시호가 재시도 2단
+    - 파일 I/O = **단일 쓰기 프로세스 원칙** (position_monitor 단독)
+    - 테스트 전략 = `trading --dry-run` 모드 P0 추가
+    - 로그 = `logs/trading.log` JSON + 계좌번호 마스킹 `******1234`
+    - 텔레그램 throttle = 초당 1건 큐
+    - 재시작 직후 "놓친 손절" 복구 스캔 P0 추가
+    - Phase 2 범위 = KRX 정규장 09:00~15:30만, NXT 제외
+    - 정량 성공 기준 7개
+  - 신규 파일 계획: `position_monitor.py`, `validator.py`, `position_state.json`, `trading_state.json`, `pending_proposals.json`, `logs/trading.log`, position_monitor plist
+- **✅ Stage 5 기술 설계 완료** (`docs/11_phase2_trading/10_codex_brief_D.md`, 1644줄)
+  - 스키마 확장: Proposal (+qty_ref/top5/kind), TradingState (+liquidation_query_sent_at)
+  - 신규 파일: `request_queue.py`, `proposal_notifier.py`, `tests/test_request_pipeline.py`
+  - 수정: `telegram_sender.py`(throttle), `orchestrator.py`(5개 명령), `position_monitor.py`(4개 tick), `intraday_discovery.py`(enqueue)
+  - **🔴 다음: 형진님 Brief D 검토 후 Codex 위임**
+
+---
+
 ## 9. Phase별 로드맵
 
 | Phase | 내용 | 상태 |
@@ -335,7 +540,7 @@ inject_to_env()  # 반드시 첫 줄에 호출
 | **Phase 1.1** | intraday_discovery round 3/4 | ✅ 완료 |
 | **Phase 1.2** | intraday_discovery round 5~8 | ✅ 완료 |
 | **Phase 1.5** | 모닝 리포트에 전날 발굴 성과 요약 추가 | 🔜 데이터 쌓인 후 |
-| **Phase 2** | 텔레그램 `/매수` `/매도` 명령 구현 + 별도 계좌 분리 | 🔜 다음 |
+| **Phase 2** | 텔레그램 승인형 매수 + 자동 매도 (별도 KIS 키 그룹) | 🟡 Stage 5 설계 + Brief A v2 완료 · 형진님 KIS 매매 전용 앱 등록 + Brief A 검토 대기 |
 | **Phase 3** | 보유 포지션 평단 관리 자동화 | 🔜 Phase 2 후 |
 | **Phase 4** | 웹 UI (전략 설정 화면) | 🔜 마지막 |
 
@@ -350,11 +555,25 @@ inject_to_env()  # 반드시 첫 줄에 호출
 - [ ] 20:30 closing_report 실행 후 `close_price`, `return_pct` 업데이트 확인
 - [ ] 텔레그램 메시지에 "추가 관심 후보" 섹션 정상 표시 확인
 
-### 🟡 Phase 2 준비 — 텔레그램 매수/매도 명령
-- [ ] strategy_config.json에 `position.split_entry` 구조 추가
-- [ ] 별도 계좌 분리 설계 (Keychain에 `KIS_TRADING_ACCOUNT_NO` 추가)
-- [ ] `/매수 종목코드 수량` 명령 구현
-- [ ] `/매도 종목코드` 전량 청산 명령 구현
+### 🟡 Phase 2 — Brief D Stage 5 완료, Codex 위임 준비 중
+- [x] Stage 1~4 완료 (brainstorm → plan_final)
+- [x] Stage 5 Phase 2 전체 기술 설계 (`05_technical_design.md`, 799줄)
+- [x] Brief A v2 작성 (`06_codex_brief_A.md` — 인프라 3건 + KIS 키 그룹 분리)
+- [x] Brief B 작성 (`07_codex_brief_B.md`)
+- [x] Brief C 작성 (`08_codex_brief_C.md` — position_monitor 골격)
+- [x] Brief D Stage 4 계획 (`09_brief_d_plan.md` — 형진님 승인)
+- [x] Brief D Stage 5 기술 설계 (`10_codex_brief_D.md`, 1644줄)
+  - 스키마 확장: Proposal (+qty_ref/top5/kind), TradingState (+liquidation_query_sent_at)
+  - 신규: `request_queue.py`, `proposal_notifier.py`, `tests/test_request_pipeline.py`
+  - 수정: `telegram_sender.py`(throttle큐), `orchestrator.py`(5개명령), `position_monitor.py`(4tick), `intraday_discovery.py`(enqueue)
+- [ ] 🔴 **형진님 수동 작업**: KIS 개발자센터에서 매매 전용 앱 신규 등록 + 소액계좌 연결
+  - APP_KEY / APP_SECRET 발급 (보관만, 등록은 Brief A Task 1 완료 후)
+- [ ] 🔴 **Brief A Task 1 완료 후**: `venv/bin/python3 morning_report/keychain_manager.py --reset-trading`
+  - 3종 일괄 입력(KIS_TRADING_APP_KEY/SECRET/ACCOUNT_NO) + 잔고조회 연결 테스트
+- [ ] Stage 8 Codex 위임 — Brief A → B → C → D 순차
+- [ ] Stage 9 Opus 코드 리뷰 (Brief 단위)
+- [ ] Stage 10 Codex 수정 반영
+- [ ] Stage 11 최종 검증 + Stage 12 QA
 
 ---
 
@@ -420,51 +639,85 @@ aigit_upload
 21. **v2.7.1 세션 중단 — plist 15:03 변경 테스트 미완료** (2026-04-21)
 22. **v2.7.2 round 5~8 plist 14:03 원복 완료** (2026-04-21)
 23. **v2.7.3 핫픽스 3종 + Stage 12 QA 진입** (2026-04-22)
+24. **v2.7.4 closing_report change_pct 수동 계산 전환 + Phase 2 Stage 2~4 완료** (2026-04-22)
+25. **v2.7.5 Phase 2 Stage 5 기술 설계 완료 + Codex Brief A v2 작성** (2026-04-23)
+26. **v2.7.6 Brief D Stage 5 기술 설계 완료** (2026-04-23)
+    - 10_codex_brief_D.md (1644줄) — 텔레그램 명령 + 주문 요청 파이프라인
+    - 신규 파일: request_queue.py, proposal_notifier.py, tests/test_request_pipeline.py (13건)
+    - 스키마 확장: Proposal (+qty_ref/top5/kind), TradingState (+liquidation_query_sent_at)
+    - position_monitor 4개 tick: ingest/notify/process/notify_loss_limit
+    - 05_technical_design.md (13섹션) — 형진님 승인 결정 4건 반영:
+      · max_daily_loss = 소액계좌 당일 시작 주문가능금액 자동 (자정 스냅샷)
+      · max_trades_per_day = 매수 기준 10건 (매도 한도 없음)
+      · 시범 운영 = `/시범시작 [N]` / `/시범종료` 텔레그램 명령어 (자정 자동 해제)
+      · **KIS 키 그룹 전체 분리** (APP_KEY/SECRET/ACCOUNT_NO 3종) + `KISClient(mode="trading")` 파라미터
+    - 06_codex_brief_A.md v2 — 인프라 3건 구현 브리프:
+      · Task 1: keychain_manager.py `_TRADING_ITEMS` 3종 + `--reset-trading` CLI
+      · Task 2: kis_client.py `mode` 파라미터 + 토큰 캐시 분리 + DRY_RUN + `place_order` 가드
+      · Task 3: strategy_config.json `trading` 섹션
 
 ---
 
-*자동 생성 | stockpilot v2.7.3 — AI 주식 자동화 시스템*
+*자동 생성 | stockpilot v2.7.5 — AI 주식 자동화 시스템*
 
 ---
 
 ## 📋 다음 세션 시작 프롬프트
 
 > 아래 내용을 복사해서 새 대화창에 붙여넣으면 바로 이어서 작업 가능합니다.
-> 마지막 갱신: 2026-04-22 (v2.7.3)
+> 마지막 갱신: 2026-04-23 (v2.7.6)
 
 ```
 stockpilot 프로젝트 이어서 진행해줘.
-HANDOFF.md 와 CLAUDE.md 파일을 먼저 읽어줘.
+CLAUDE.md → HANDOFF.md → WORKFLOW.md 순서로 읽고,
+docs/11_phase2_trading/ 아래 01~10 문서도 확인해줘.
 경로: /Users/geenya/projects/AI_Projects/stockpilot/
 
-현재 상태 요약:
-- v2.7.3 (2026-04-22) — 핫픽스 3종 완료 + Stage 12 QA 진행 중
-  1) HTS capture-uplmt 404 → _fetch_hts_rank() 비활성화
-  2) stock_discovery "0원" 표시 → analyze_swing.py current_price 키 추가
-  3) dry-run 데이터 오염 → 8개 round 전체 state.update/_save_discovery_log 가드
-- Phase 1~1.2 전부 완료 (운영 스케줄 정상)
-- launchctl `com.aigeenya.stockreport.discovery` 는 23:30 stock_discovery 의 정당한 plist (삭제 금지)
+현재 상태 요약 (v2.7.6 · 2026-04-23):
+- Phase 2 Brief D Stage 5 기술 설계 완료 (10_codex_brief_D.md, 1644줄)
+- Brief A~C + D Stage5까지 설계 완료 → 구현 순서: A → B → C → D
+- Brief D 핵심 설계:
+  · Proposal 스키마 확장: qty_ref, top5, kind 필드 추가 (기존 테스트 자동 호환)
+  · TradingState 스키마 확장: liquidation_query_sent_at 추가 (강제청산 질의 중복 방지)
+  · 신규: request_queue.py (JSONL IPC), proposal_notifier.py (카드 포맷터)
+  · telegram_sender.py: enqueue_text() + throttle worker (초당 1건)
+  · orchestrator.py: /매수함 /매수안함 /종목변경 /청산함 /청산안함 5개 명령 추가
+  · position_monitor.py: 4개 tick 추가 (ingest/notify/process/notify_loss_limit)
+  · intraday_discovery.py: round 2/4/6/8 종료 시 discovery_result.jsonl enqueue
+  · 통합 테스트: tests/test_request_pipeline.py 13건
 
 다음 할 작업:
-1. [Stage 12 QA 마무리] 남은 검증 포인트 확인
-   - 14:03~14:33 round 5~8 자동 실행 + 오후 추적 (최근 실행 결과 점검)
-   - 20:30 closing_report 실행 + close_price/return_pct 업데이트 확인
-   - 23:30 stock_discovery 실행 + 핫픽스 #2 검증 (0원 → 실제 종가 표시)
-2. [Phase 2 준비] 텔레그램 /매수 /매도 명령 구현
-   - strategy_config.json에 position.split_entry 구조 추가
-   - 별도 계좌 분리 (Keychain에 KIS_TRADING_ACCOUNT_NO 추가)
-   - /매수 종목코드 수량 / /매도 종목코드 전량 청산
+1. 🔴 형진님 수동 작업:
+   · KIS 개발자센터(apiportal.koreainvestment.com) 로그인
+   · 매매 전용 앱 신규 등록 (예: stockpilot-trading)
+   · 해당 앱에 실전 소액계좌 연결
+   · APP_KEY / APP_SECRET 안전 보관 (등록은 Brief A Task 1 구현 완료 후)
+2. Codex에 Brief A 위임 (06_codex_brief_A.md v2):
+   · Task 1: keychain_manager.py — _TRADING_ITEMS 3종 + --reset-trading CLI
+   · Task 2: kis_client.py — mode 파라미터 + 토큰 캐시 분리 + DRY_RUN 분기
+   · Task 3: strategy_config.json — trading 섹션 신설
+3. Brief A 구현 완료 후:
+   · 형진님: `venv/bin/python3 morning_report/keychain_manager.py --reset-trading` 실행
+   · Claude: Opus Stage 9 코드 리뷰
+4. Brief A 통과 → Brief B → Brief C → Brief D 순차
+
+Brief 전체 구성 (Stage 8):
+- Brief A (인프라): keychain + kis_client + strategy_config
+- Brief B (상태·검증): position_state/trading_state/pending_proposals/validator
+- Brief C (monitor 코어): position_monitor 골격 + 복구 + 자정리셋
+- Brief D (입출력): request_queue + throttle + orchestrator + monitor 4tick ← 설계 완료
+- Brief E (마감·배포): closing_report 섹션 + launchd plist
+- Brief F (테스트): dry-run 통합 시나리오 5종
 
 백로그 (우선순위 낮음):
-- NXT 야간 종가 병표기 기능 (정규장 + NXT hybrid)
-- launchctl 네이밍 리네이밍 검토 (discovery vs discovery5~8 혼동 방지)
-- HTS 온라인관심 가산점 복구 (top-interest-stock 또는 hts-top-view API로 마이그레이션)
+- NXT 야간 종가 병표기
+- launchctl 네이밍 리네이밍
+- HTS 온라인관심 가산점 복구
 
 참고 사항:
-- 새 기능 개발 시 반드시 WORKFLOW.md Stage 1~7 순서 준수
-- 수정 후 반드시 venv/bin/python3 -m py_compile 문법 검사
-- 터미널 명령 블록 맨 위에 항상 cd /Users/geenya/projects/AI_Projects/stockpilot 포함
-- dry-run 은 이제 진짜 dry-run (운영 데이터 절대 오염 안 됨)
+- 구현(Stage 8, 10)은 Codex 위임, Claude는 설계·검증만
+- 수정 후 venv/bin/python3 -m py_compile 문법 검사
+- 터미널 블록 맨 위 cd /Users/geenya/projects/AI_Projects/stockpilot 포함
 
 어디서부터 시작할까?
 ```

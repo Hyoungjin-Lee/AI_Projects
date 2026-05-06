@@ -22,6 +22,16 @@ data/raw/
 # 에이전트 런타임 상태 (매일 자동 갱신)
 data/daily_state.json
 
+# Phase 2 매매 운영 상태 (런타임 갱신)
+data/pending_proposals.json
+data/portfolio_history.json
+data/position_state.json
+data/trading_state.json
+
+# 발굴/관심종목 런타임 데이터 (매 round/sync마다 갱신)
+data/discovery_log.json
+data/watchlist.json
+
 # 로그
 logs/*.log
 logs/*.log.*

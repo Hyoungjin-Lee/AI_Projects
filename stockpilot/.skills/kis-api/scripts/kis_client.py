@@ -3,6 +3,7 @@
 
 설계 원칙:
 - 토큰은 파일 캐시. KIS는 1분당 1회 토큰 발급 제한이 있어 매번 새로 받으면 안 됨.
+- 기본 모드는 observation이며, 실전 주문은 mode='trading' 인스턴스에서만 허용.
 - 실제 주문(place_order)은 KIS_ALLOW_LIVE_ORDER=1 환경변수가 있어야만 동작.
 - 모든 응답은 dict로 반환. 호출자가 후처리.
 """
@@ -24,7 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
-TOKEN_CACHE_PATH = PROJECT_ROOT / "data" / "cache" / "kis_token.json"
+TOKEN_CACHE_DIR = PROJECT_ROOT / "data" / "cache"
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
 
@@ -43,32 +44,60 @@ def _mask(value: str, show: int = 4) -> str:
     return value[:show] + "*" * max(0, len(value) - show)
 
 
-class KISClient:
-    def __init__(self) -> None:
-        self.app_key = os.getenv("KIS_APP_KEY")
-        self.app_secret = os.getenv("KIS_APP_SECRET")
-        self.account_no = os.getenv("KIS_ACCOUNT_NO", "")
-        self.hts_id = os.getenv("KIS_HTS_ID", "").split("#")[0].strip()  # 관심종목 조회에 필요
+def _token_cache_path(mode: str) -> Path:
+    """모드별 토큰 캐시 파일 경로."""
+    if mode == "observation":
+        return TOKEN_CACHE_DIR / "kis_token.json"
+    if mode == "trading":
+        return TOKEN_CACHE_DIR / "kis_token_trading.json"
+    raise ValueError(f"unknown KISClient mode: {mode}")
 
-        missing = [k for k, v in {
-            "KIS_APP_KEY": self.app_key,
-            "KIS_APP_SECRET": self.app_secret,
-            "KIS_ACCOUNT_NO": self.account_no,
-        }.items() if not v]
+
+class KISClient:
+    def __init__(self, mode: str = "observation") -> None:
+        if mode not in ("observation", "trading"):
+            raise ValueError(
+                f"KISClient mode must be 'observation' or 'trading', got: {mode}"
+            )
+        self.mode = mode
+
+        if mode == "observation":
+            key_envs = ("KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_NO")
+        else:
+            key_envs = (
+                "KIS_TRADING_APP_KEY",
+                "KIS_TRADING_APP_SECRET",
+                "KIS_TRADING_ACCOUNT_NO",
+            )
+
+        self.app_key = os.getenv(key_envs[0])
+        self.app_secret = os.getenv(key_envs[1])
+        self.account_no = os.getenv(key_envs[2], "")
+        self.hts_id = (
+            os.getenv("KIS_HTS_ID", "").split("#")[0].strip()
+            if mode == "observation"
+            else ""
+        )
+
+        missing = [
+            key for key, value in zip(key_envs, (self.app_key, self.app_secret, self.account_no))
+            if not value
+        ]
         if missing:
             raise KISConfigError(
-                f"환경변수 누락: {', '.join(missing)}. "
-                f"프로젝트 루트의 .env 파일을 확인하세요."
+                f"[mode={mode}] 환경변수 누락: {', '.join(missing)}. "
+                f"{'keychain_manager.py --reset' if mode == 'observation' else 'keychain_manager.py --reset-trading'} 로 등록하세요."
             )
 
         if "-" not in self.account_no:
             raise KISConfigError(
-                "KIS_ACCOUNT_NO 형식 오류. '12345678-01' 형태(8자리-2자리)여야 합니다."
+                f"[mode={mode}] 계좌번호 형식 오류. '12345678-01' 형태여야 합니다."
             )
         self.cano, self.acnt_prdt_cd = self.account_no.split("-", 1)
         self.base_url = REAL_BASE_URL  # 사용자 결정: 실전만
 
-        TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._token_cache_path = _token_cache_path(mode)
+        self._token_cache_path.parent.mkdir(parents=True, exist_ok=True)
         RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
         # 보수적 레이트 리밋 (KIS는 초당 20건이지만 안전 마진)
@@ -77,30 +106,30 @@ class KISClient:
 
     # ------------------------------------------------------------------ token
     def _load_cached_token(self) -> str | None:
-        if not TOKEN_CACHE_PATH.exists():
+        if not self._token_cache_path.exists():
             return None
         try:
-            data = json.loads(TOKEN_CACHE_PATH.read_text())
+            data = json.loads(self._token_cache_path.read_text())
         except (json.JSONDecodeError, OSError):
             # P4: 손상된 캐시 파일 삭제
             try:
-                TOKEN_CACHE_PATH.unlink(missing_ok=True)
+                self._token_cache_path.unlink(missing_ok=True)
             except OSError:
                 pass
             return None
         # P4: expire_at 키 누락 방어
         expire_str = data.get("expire_at")
         if not expire_str:
-            TOKEN_CACHE_PATH.unlink(missing_ok=True)
+            self._token_cache_path.unlink(missing_ok=True)
             return None
         try:
             expire = datetime.fromisoformat(expire_str)
         except ValueError:
-            TOKEN_CACHE_PATH.unlink(missing_ok=True)
+            self._token_cache_path.unlink(missing_ok=True)
             return None
         # 만료 5분 전이면 무효 → 캐시 삭제
         if expire - datetime.now() < timedelta(minutes=5):
-            TOKEN_CACHE_PATH.unlink(missing_ok=True)
+            self._token_cache_path.unlink(missing_ok=True)
             return None
         return data.get("access_token")
 
@@ -109,12 +138,12 @@ class KISClient:
         # P4: atomic write로 손상 방지
         import tempfile
         tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=TOKEN_CACHE_PATH.parent, suffix=".tmp"
+            dir=self._token_cache_path.parent, suffix=".tmp"
         )
         try:
             with os.fdopen(tmp_fd, "w") as f:
                 json.dump({"access_token": token, "expire_at": expire_at.isoformat()}, f)
-            os.replace(tmp_path, TOKEN_CACHE_PATH)
+            os.replace(tmp_path, self._token_cache_path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -302,13 +331,22 @@ class KISClient:
         except (TypeError, ValueError):
             return 0
 
+    def assert_trading_mode(self) -> None:
+        """트레이딩 전용 호출 전 mode를 명시적으로 검증."""
+        if self.mode != "trading":
+            raise KISConfigError(f"트레이딩 모드 전용 호출. 현재 mode={self.mode}")
+
     def get_watchlist_groups(self) -> list[dict]:
         """
         HTS 관심종목 그룹 목록 조회 [국내주식-204]
         TR: HHKCM113004C7  /uapi/domestic-stock/v1/quotations/intstock-grouplist
         반환: [{"grp_code": "001", "grp_name": "관심종목1"}, ...]
-        KIS_HTS_ID 환경변수 필요.
+        KIS_HTS_ID 환경변수 필요. observation 모드 전용.
         """
+        if self.mode != "observation":
+            raise KISConfigError(
+                f"관심종목 조회는 observation 모드 전용입니다. 현재 mode={self.mode}"
+            )
         data = self._get(
             "/uapi/domestic-stock/v1/quotations/intstock-grouplist",
             tr_id="HHKCM113004C7",
@@ -338,7 +376,12 @@ class KISClient:
         grp_code: get_watchlist_groups()에서 얻은 inter_grp_code (예: "001")
         반환: [{"code": "005930", "name": "삼성전자"}, ...]
         엑셀 예시 참고: TYPE=1, FID_ETC_CLS_CODE=4, USER_ID=HTS_ID 입력
+        observation 모드 전용.
         """
+        if self.mode != "observation":
+            raise KISConfigError(
+                f"관심종목 조회는 observation 모드 전용입니다. 현재 mode={self.mode}"
+            )
         data = self._get(
             "/uapi/domestic-stock/v1/quotations/intstock-stocklist-by-group",
             tr_id="HHKCM113004C6",
@@ -371,6 +414,11 @@ class KISClient:
         price=None 이면 시장가, 아니면 지정가.
         실제 전송은 하지 않음. payload + tr_id + endpoint를 dict로 반환.
         """
+        if self.mode != "trading":
+            raise KISConfigError(
+                f"주문은 mode='trading' 인스턴스에서만 가능합니다. 현재 mode={self.mode}. "
+                "KISClient(mode='trading') 으로 생성하세요."
+            )
         side = side.upper()
         if side not in ("BUY", "SELL"):
             raise ValueError("side must be BUY or SELL")
@@ -395,21 +443,39 @@ class KISClient:
             "human_summary": (
                 f"{'매수' if side == 'BUY' else '매도'} | 종목 {code} | "
                 f"수량 {qty}주 | "
-                f"{'시장가' if price is None else f'지정가 {price:,}원'}"
+                f"{'시장가' if price is None else f'지정가 {price:,}원'} | "
+                f"계좌 {_mask(self.account_no)}"
             ),
         }
 
     def place_order(self, side: str, code: str, qty: int, price: int | None = None) -> dict:
         """
-        실제 주문 전송. 안전장치: 환경변수 KIS_ALLOW_LIVE_ORDER=1 필수.
-        설정되어 있지 않으면 즉시 RuntimeError.
+        실제 주문 전송. 안전장치:
+          1. self.mode == "trading"
+          2. DRY_RUN=1 이면 mock 응답 반환
+          3. KIS_ALLOW_LIVE_ORDER=1 필수
         """
+        draft = self.build_order_payload(side, code, qty, price)
+
+        if os.getenv("DRY_RUN") == "1":
+            import uuid
+
+            return {
+                "rt_cd": "0",
+                "msg_cd": "DRY_RUN",
+                "msg1": f"DRY_RUN {draft['human_summary']}",
+                "output": {
+                    "KRX_FWDG_ORD_ORGNO": "00000",
+                    "ODNO": f"DRY{uuid.uuid4().hex[:10].upper()}",
+                    "ORD_TMD": datetime.now().strftime("%H%M%S"),
+                },
+            }
+
         if os.getenv("KIS_ALLOW_LIVE_ORDER") != "1":
             raise RuntimeError(
                 "실주문 전송이 차단됨. 환경변수 KIS_ALLOW_LIVE_ORDER=1 을 명시적으로 설정해야 함. "
                 "현재는 build_order_payload()로 초안만 생성 가능."
             )
-        draft = self.build_order_payload(side, code, qty, price)
         return self._post(draft["endpoint"], draft["tr_id"], draft["body"])
 
 
